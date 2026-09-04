@@ -1,5 +1,5 @@
 schema_version: "1.0"
-dictionary_version: "0.3-draft"
+dictionary_version: "0.4-draft"
 corpus:
   title: "Фонд 230, описи 1–4"
   sheets: ["Опис 1", "Опис 2", "Опис 3", "Опис 4"]

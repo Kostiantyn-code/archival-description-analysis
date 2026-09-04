@@ -124,7 +124,7 @@ STEM_ENDINGS = sorted(
     {
         "остями", "істями", "остях", "істях", "остям", "істям",
         "остей", "істей", "ості", "істю", "ість",
-        "ими", "іми", "ами", "ями", "ові", "еві", "єві",
+        "ими", "іми", "ами", "ями",
         "ього", "ьому", "ого", "ому",
         "ій", "ої", "ьої", "ою", "ею", "єю",
         "ів", "їв", "ев", "ов", "ам", "ям", "ах", "ях",
@@ -189,6 +189,37 @@ def light_stem_word(word: str) -> str:
         "набор": "набір",
         "рок": "рік",
         "шпитал": "шпиталь",
+        "суден": "судн",
+        "недоїмок": "недоїмк",
+        "крадіжок": "крадіжк",
+        "грабеж": "грабіж",
+        "міщанин": "міщан",
+        "міщан": "міщан",
+        "дворянин": "дворян",
+        "дворян": "дворян",
+        "селянин": "селян",
+        "селян": "селян",
+        "громадянин": "громадян",
+        "громадян": "громадян",
+        "протоієрей": "протоієр",
+        "протоієре": "протоієр",
+        "священник": "священик",
+        "священик": "священик",
+        "правлінн": "правлін",
+        "правлін": "правлін",
+        "присутствіє": "присутств",
+        "присутстві": "присутств",
+        "присутствієм": "присутств",
+        "виданн": "видан",
+        "видан": "видан",
+        "вчинен": "вчиненн",
+        "нанесен": "нанесенн",
+        "церк": "церкв",
+        "режим": "реж",
+        "позов": "поз",
+        "друкарен": "друкарн",
+        "видавец": "видавц",
+        "шкіл": "школ",
     }
     return irregular.get(word, word)
 
@@ -311,7 +342,8 @@ def load_dictionaries(yaml_module):
         key: value.get("label", key)
         for key, value in index.get("macroblocks", {}).items()
     }
-    return categories, ambiguities, stopwords, macroblocks
+    dictionary_version = str(index.get("dictionary_version", "невідома"))
+    return categories, ambiguities, stopwords, macroblocks, dictionary_version
 
 
 def detect_status(case_id: str, title: str) -> str:
@@ -974,6 +1006,7 @@ def write_analysis_report(
     macroblock_labels: dict[str, str],
     table_data: dict[str, Any],
     figures_created: bool,
+    dictionary_version: str,
 ) -> None:
     active = table_data["active"]
     unclassified = table_data["unclassified"]
@@ -1103,7 +1136,7 @@ def write_analysis_report(
             "",
             "## Методичне застереження",
             "",
-            "Це тестова класифікація за словниками версії 0.3-draft. "
+            f"Це тестова класифікація за словниками версії {dictionary_version}. "
             "Перед використанням числових результатів у дисертації потрібно "
             "перевірити needs_review.csv та unclassified_cases.csv, "
             "після чого скоригувати словники.",
@@ -1253,9 +1286,10 @@ def main() -> None:
     ensure_directories()
 
     print("\n1. Завантаження класифікаційних словників...")
-    categories, ambiguities, stopwords, macroblock_labels = load_dictionaries(
-        yaml_module
-    )
+    (
+        categories, ambiguities, stopwords, macroblock_labels,
+        dictionary_version,
+    ) = load_dictionaries(yaml_module)
     print(f"   Завантажено категорій: {len(categories)}")
     print(f"   Завантажено стоп-слів: {len(stopwords)}")
 
@@ -1279,7 +1313,7 @@ def main() -> None:
     print("7. Створення аналітичного звіту...")
     write_analysis_report(
         records, issues, categories, macroblock_labels,
-        table_data, figures_created
+        table_data, figures_created, dictionary_version
     )
     print_summary(records, issues, table_data, figures_created)
 

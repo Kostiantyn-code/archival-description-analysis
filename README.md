@@ -4,7 +4,7 @@ Reproducible Python tools for quantitative and thematic analysis of archival des
 
 [Українською](#українською) · [English](#english)
 
-> **Статус проєкту:** робоча версія `0.3-draft`. Репозиторій містить придатний
+> **Статус проєкту:** робоча версія `0.4-draft`. Репозиторій містить придатний
 > до запуску Python-скрипт, класифікаційні словники та документацію методики.
 > Повний масив архівних описів не публікується.
 
@@ -39,11 +39,12 @@ Python.
 - формує службові CSV, `error.log`, аналітичний звіт і графіки PNG/SVG;
 - показує прогрес тривалої тематичної класифікації.
 
-Версію словників `0.3-draft` розширено за результатами перегляду 2 690
-заголовків, тематику яких не визначила попередня версія. Орієнтовне покриття
-класифікацією зросло приблизно з 77,6% до 91%. Остаточні числові результати
-мають бути зафіксовані після повторного запуску на актуальному `input.xlsx` та
-перевірки контрольної вибірки.
+Версію словників `0.4-draft` додатково перевірено за 1 086 рядками, які
+залишилися без теми після запуску `0.3-draft`. Виявлено 23 службові позначки
+вибуття з міжлітерними пробілами. Із 1 063 змістовних заголовків нові
+високоточні правила класифікують 429, а 634 свідомо залишають без категорії.
+Очікуване покриття повного корпусу — близько 94,71%; остаточні значення слід
+зафіксувати повторним запуском на актуальному `input.xlsx`.
 
 ### Важливе застереження щодо кількості справ
 
@@ -136,7 +137,8 @@ work/
 
 - [методика формування словників](docs/dictionary-methodology.md);
 - [профіль корпусу](docs/corpus-profile.md);
-- [звіт про перегляд версії 0.3-draft](docs/revision-0.3.md).
+- [звіт про перегляд версії 0.3-draft](docs/revision-0.3.md);
+- [звіт про перегляд версії 0.4-draft](docs/revision-0.4.md).
 
 ### Структура репозиторію
 
@@ -151,7 +153,8 @@ dictionaries/
 docs/
 ├── dictionary-methodology.md
 ├── corpus-profile.md
-└── revision-0.3.md
+├── revision-0.3.md
+└── revision-0.4.md
 ```
 
 ### Дослідницька основа
@@ -188,7 +191,7 @@ ORCID: [0000-0002-2054-7236](https://orcid.org/0000-0002-2054-7236)
 reproducible quantitative and thematic analysis of archival finding-aid
 records with Python.
 
-The current `0.3-draft` implementation contains an executable analysis script,
+The current `0.4-draft` implementation contains an executable analysis script,
 transparent YAML classification dictionaries, and methodological
 documentation. Its initial case study concerns Fond 230, Office of the
 Mykolaiv Military Governor, preserved at the State Archives of Mykolaiv Region.
@@ -200,7 +203,8 @@ in the repository.
 
 ### Research status
 
-Preliminary dictionary coverage is approximately 91%. A discrepancy between
+Projected dictionary coverage is approximately 94.71%, pending a full rerun
+on the current workbook. A discrepancy between
 the calculated 11,980 substantive titles and the official figure of 11,988
 files remains under review and is documented transparently rather than being
 silently reconciled.
