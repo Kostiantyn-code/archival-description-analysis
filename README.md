@@ -4,7 +4,7 @@ Reproducible Python tools for quantitative and thematic analysis of archival des
 
 [Українською](#українською) · [English](#english)
 
-> **Статус проєкту:** робоча версія `0.4-draft`. Репозиторій містить придатний
+> **Статус проєкту:** робоча версія `0.5-draft`. Репозиторій містить придатний
 > до запуску Python-скрипт, класифікаційні словники та документацію методики.
 > Повний масив архівних описів не публікується.
 
@@ -33,18 +33,21 @@ Python.
 - розпізнає справи, заголовки років, записи про архівний опис і службові
   позначки `ВИБУЛА`, `ВИБУЛИ`, `ВИБУЛО`, зокрема надруковані з міжлітерними
   пробілами;
+- відокремлює загальні заголовки груп справ і не вважає їх помилками;
 - перевіряє структуру таблиці, дати, дублікати, пропуски та нетипові значення;
 - не включає вибулі й структурні записи до змістового аналізу;
-- виконує багатозначну тематичну класифікацію за відкритими YAML-словниками;
+- окремо визначає предметні теми та контекстні згадки за відкритими YAML-словниками;
 - формує службові CSV, `error.log`, аналітичний звіт і графіки PNG/SVG;
 - показує прогрес тривалої тематичної класифікації.
 
-Версію словників `0.4-draft` додатково перевірено за 1 086 рядками, які
-залишилися без теми після запуску `0.3-draft`. Виявлено 23 службові позначки
-вибуття з міжлітерними пробілами. Із 1 063 змістовних заголовків нові
-високоточні правила класифікують 429, а 634 свідомо залишають без категорії.
-Очікуване покриття повного корпусу — близько 94,71%; остаточні значення слід
-зафіксувати повторним запуском на актуальному `input.xlsx`.
+Версія `0.5-draft` розмежовує предмет справи та лексичний контекст. Назви установ,
+посади і станові означення на кшталт `канцелярія`, `поліція`, `чиновник`, `купець` і
+`міщанин` не визначають тему автоматично. Вони зберігаються як контекстні мітки і входять
+до тематичних підрахунків лише за наявності сильної предметної ознаки.
+
+Контрольний розрахунок на 11 980 заголовках визначив предметну тему для 8 334 (69,57%),
+лише контекст — для 3 523 (29,41%), а ні теми, ні контексту — для 123 (1,03%). Кілька предметних тем виявлено
+у 2 484 заголовках (20,73%). Ці відсотки описують словникове покриття, а не точність класифікації.
 
 ### Важливе застереження щодо кількості справ
 
@@ -57,7 +60,7 @@ Python.
 
 ### Тематична модель
 
-Класифікація є багатозначною: одна справа може належати до кількох категорій.
+Предметна класифікація є багатозначною: одна справа може належати до кількох категорій.
 
 | Макроблок | Категорії |
 |---|---|
@@ -108,6 +111,8 @@ figures/
 work/
 ├── records.csv
 ├── unclassified_cases.csv
+├── context_only_cases.csv
+├── context_mentions.csv
 ├── needs_review.csv
 ├── category_counts.csv
 ├── cases_by_decade.csv
@@ -132,6 +137,8 @@ work/
    процесів.
 6. **Відмова від примусової класифікації.** Недостатньо інформативний заголовок
    може залишатися без тематичної категорії.
+7. **Відокремлення теми від контексту.** Згадка установи, посади чи стану
+   не ототожнюється з предметом справи.
 
 Детальніше:
 
@@ -139,6 +146,7 @@ work/
 - [профіль корпусу](docs/corpus-profile.md);
 - [звіт про перегляд версії 0.3-draft](docs/revision-0.3.md);
 - [звіт про перегляд версії 0.4-draft](docs/revision-0.4.md).
+- [звіт про перегляд версії 0.5-draft](docs/revision-0.5.md).
 
 ### Структура репозиторію
 
@@ -154,7 +162,8 @@ docs/
 ├── dictionary-methodology.md
 ├── corpus-profile.md
 ├── revision-0.3.md
-└── revision-0.4.md
+├── revision-0.4.md
+└── revision-0.5.md
 ```
 
 ### Дослідницька основа
@@ -191,23 +200,24 @@ ORCID: [0000-0002-2054-7236](https://orcid.org/0000-0002-2054-7236)
 reproducible quantitative and thematic analysis of archival finding-aid
 records with Python.
 
-The current `0.4-draft` implementation contains an executable analysis script,
+The current `0.5-draft` implementation contains an executable analysis script,
 transparent YAML classification dictionaries, and methodological
 documentation. Its initial case study concerns Fond 230, Office of the
 Mykolaiv Military Governor, preserved at the State Archives of Mykolaiv Region.
 
 The software validates XLSX records, distinguishes substantive and service
-entries, performs multi-label thematic classification, and produces CSV
-tables, reports, and PNG/SVG figures. Full archival datasets are not included
-in the repository.
+entries, separates subject themes from contextual mentions, performs
+multi-label thematic classification, and produces CSV tables, reports, and
+PNG/SVG figures. Full archival datasets are not included in the repository.
 
 ### Research status
 
-Projected dictionary coverage is approximately 94.71%, pending a full rerun
-on the current workbook. A discrepancy between
-the calculated 11,980 substantive titles and the official figure of 11,988
-files remains under review and is documented transparently rather than being
-silently reconciled.
+The control run covered 11,980 titles. Subject themes were identified for
+8,334 titles (69.57%), contextual evidence only for 3,523 (29.41%), and no
+dictionary evidence for 123 (1.03%). These values describe dictionary
+coverage, not classification accuracy. The discrepancy between 11,980 titles
+and the official figure of 11,988 files remains under review and is documented
+transparently rather than being silently reconciled.
 
 ### Author
 

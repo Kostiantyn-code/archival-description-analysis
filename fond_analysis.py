@@ -15,6 +15,7 @@ from typing import Any, Iterable
 
 
 BASE_DIR = Path(__file__).resolve().parent
+SCRIPT_VERSION = "0.5-draft"
 INPUT_FILE = BASE_DIR / "input.xlsx"
 DICTIONARIES_DIR = BASE_DIR / "dictionaries"
 REPORTS_DIR = BASE_DIR / "reports"
@@ -74,6 +75,8 @@ class Category:
     minimum_score: int
     strong_phrases: list[str]
     strong_terms: list[str]
+    context_only_phrases: list[str]
+    context_only_terms: list[str]
     contextual_terms: list[str]
     context_rules: list[dict[str, Any]]
     exclude_phrases: list[str]
@@ -100,6 +103,9 @@ class Record:
     macroblocks: list[str] = field(default_factory=list)
     scores: dict[str, int] = field(default_factory=dict)
     evidence: dict[str, list[str]] = field(default_factory=dict)
+    context_categories: list[str] = field(default_factory=list)
+    context_category_labels: list[str] = field(default_factory=list)
+    context_evidence: dict[str, list[str]] = field(default_factory=dict)
     review_flags: list[str] = field(default_factory=list)
 
 
@@ -157,7 +163,16 @@ def normalize_text(text: str) -> str:
 
 
 def tokenize(text: str) -> list[str]:
-    return WORD_RE.findall(normalize_text(text))
+    normalized = normalize_text(text)
+    # У джерелі складні слова інколи набрано з пробілами біля дефіса:
+    # «військово- морський». Для зіставлення це те саме складне слово.
+    normalized = re.sub(
+        r"(?<=[A-Za-zА-Яа-яІіЇїЄєҐґЁё])\s*-\s*"
+        r"(?=[A-Za-zА-Яа-яІіЇїЄєҐґЁё])",
+        "-",
+        normalized,
+    )
+    return WORD_RE.findall(normalized)
 
 
 @lru_cache(maxsize=100_000)
@@ -193,6 +208,9 @@ def light_stem_word(word: str) -> str:
         "шпитал": "шпиталь",
         "суден": "судн",
         "недоїмок": "недоїмк",
+        "угідь": "угідд",
+        "угід": "угідд",
+        "платеж": "платіж",
         "крадіжок": "крадіжк",
         "грабеж": "грабіж",
         "міщанин": "міщан",
@@ -222,6 +240,14 @@ def light_stem_word(word: str) -> str:
         "друкарен": "друкарн",
         "видавец": "видавц",
         "шкіл": "школ",
+        "збор": "збір",
+        "звод": "звід",
+        "купален": "купальн",
+        "молебн": "молебен",
+        "гулян": "гулянн",
+        "ярмарок": "ярмарк",
+        "водосток": "водостік",
+        "укріплен": "укріпленн",
     }
     return irregular.get(word, word)
 
@@ -251,7 +277,10 @@ def contains_item(tokens: list[str], item: str) -> bool:
     if not wanted:
         return False
     if len(wanted) == 1:
-        return wanted[0] in tokens
+        return any(
+            wanted[0] == token or wanted[0] in token.split("-")
+            for token in tokens
+        )
     return bool(find_phrase_positions(tokens, wanted))
 
 
@@ -260,6 +289,11 @@ def mask_item(tokens: list[str], item: str) -> list[str]:
     if not phrase:
         return tokens
     result = list(tokens)
+    if len(phrase) == 1:
+        for index, token in enumerate(result):
+            if phrase[0] == token or phrase[0] in token.split("-"):
+                result[index] = "__masked__"
+        return result
     for start in find_phrase_positions(result, phrase):
         for index in range(start, start + len(phrase)):
             result[index] = "__masked__"
@@ -313,6 +347,10 @@ def load_dictionaries(yaml_module):
                 ),
                 strong_phrases=list(data.get("strong_phrases", [])),
                 strong_terms=list(data.get("strong_terms", [])),
+                context_only_phrases=list(
+                    data.get("context_only_phrases", [])
+                ),
+                context_only_terms=list(data.get("context_only_terms", [])),
                 contextual_terms=list(data.get("contextual_terms", [])),
                 context_rules=list(data.get("context_rules", [])),
                 exclude_phrases=list(data.get("exclude_phrases", [])),
@@ -348,7 +386,13 @@ def load_dictionaries(yaml_module):
     return categories, ambiguities, stopwords, macroblocks, dictionary_version
 
 
-def detect_status(case_id: str, title: str) -> str:
+def detect_status(
+    case_id: str,
+    title: str,
+    dates: str = "",
+    pages: str = "",
+    notes: str = "",
+) -> str:
     title_normalized = normalize_text(title).strip()
     if YEAR_HEADING_RE.match(title_normalized) and not case_id:
         return "year_heading"
@@ -359,7 +403,11 @@ def detect_status(case_id: str, title: str) -> str:
     if title_normalized.startswith("архівний опис"):
         return "inventory"
     if case_id and title:
-        return "active"
+        return "case"
+    # Загальні заголовки груп справ можуть не мати номера.
+    # Якщо інші облікові поля такого рядка порожні, це не помилка.
+    if title and not case_id and not any((dates, pages, notes)):
+        return "group_heading"
     if case_id or title:
         return "unknown"
     return "empty"
@@ -546,7 +594,9 @@ def read_records(
             case_id_raw, title_raw, dates_raw, pages_raw, notes_raw = [
                 clean_cell(value) for value in values
             ]
-            status = detect_status(case_id_raw, title_raw)
+            status = detect_status(
+                case_id_raw, title_raw, dates_raw, pages_raw, notes_raw
+            )
             if status == "empty":
                 continue
             if status == "year_heading":
@@ -570,7 +620,7 @@ def read_records(
                 section_year=current_section_year,
             )
 
-            if status == "active":
+            if status == "case":
                 record.start_year, record.end_year = parse_years(
                     dates_raw, excel_row, case_id_raw, issues, sheet_name
                 )
@@ -596,7 +646,7 @@ def read_records(
 
     occurrences: dict[tuple[str, str], list[Record]] = defaultdict(list)
     for record in records:
-        if record.case_id_normalized and record.status in {"active", "withdrawn"}:
+        if record.case_id_normalized and record.status in {"case", "withdrawn"}:
             key = (record.sheet_name, record.case_id_normalized)
             occurrences[key].append(record)
 
@@ -657,12 +707,30 @@ def classify_title(
     matched_labels: list[str] = []
     scores: dict[str, int] = {}
     evidence: dict[str, list[str]] = {}
+    context_ids: list[str] = []
+    context_labels: list[str] = []
+    context_evidence: dict[str, list[str]] = {}
     review_flags: set[str] = set()
 
     for category in categories:
         tokens = global_masks_for_category(original_tokens, category.id, ambiguities)
         for phrase in category.exclude_phrases:
             tokens = mask_item(tokens, phrase)
+
+        category_context_evidence: list[str] = []
+        for phrase in category.context_only_phrases:
+            if contains_item(tokens, phrase):
+                category_context_evidence.append(f"фраза: {phrase}")
+        for term in category.context_only_terms:
+            if contains_item(tokens, term):
+                category_context_evidence.append(f"термін: {term}")
+        for term in category.contextual_terms:
+            if contains_item(tokens, term):
+                category_context_evidence.append(f"слабкий контекст: {term}")
+        if category_context_evidence:
+            context_ids.append(category.id)
+            context_labels.append(category.label)
+            context_evidence[category.id] = category_context_evidence
 
         score = 0
         category_evidence: list[str] = []
@@ -730,7 +798,8 @@ def classify_title(
     ]
     return (
         matched_ids, matched_labels, macroblocks,
-        scores, evidence, sorted(review_flags)
+        scores, evidence, context_ids, context_labels,
+        context_evidence, sorted(review_flags)
     )
 
 
@@ -740,7 +809,7 @@ def classify_records(
     ambiguities: list[dict[str, Any]],
     macroblock_order: list[str],
 ) -> None:
-    active_records = [record for record in records if record.status == "active"]
+    active_records = [record for record in records if record.status == "case"]
     total = len(active_records)
     if total == 0:
         print("   Немає справ для тематичної класифікації.")
@@ -757,6 +826,9 @@ def classify_records(
             record.macroblocks,
             record.scores,
             record.evidence,
+            record.context_categories,
+            record.context_category_labels,
+            record.context_evidence,
             record.review_flags,
         ) = classify_title(
             record.title_raw, categories, ambiguities, macroblock_order
@@ -824,6 +896,10 @@ def record_to_row(record: Record) -> dict[str, Any]:
     scores_text = " | ".join(
         f"{category_id}={score}" for category_id, score in record.scores.items()
     )
+    context_evidence_text = " | ".join(
+        f"{category_id}: {', '.join(values)}"
+        for category_id, values in record.context_evidence.items()
+    )
     return {
         "sheet_name": record.sheet_name,
         "excel_row": record.excel_row,
@@ -843,6 +919,11 @@ def record_to_row(record: Record) -> dict[str, Any]:
         "macroblocks": " | ".join(record.macroblocks),
         "scores": scores_text,
         "evidence": evidence_text,
+        "context_category_ids": " | ".join(record.context_categories),
+        "context_category_labels": " | ".join(
+            record.context_category_labels
+        ),
+        "context_evidence": context_evidence_text,
         "review_flags": " | ".join(record.review_flags),
     }
 
@@ -858,23 +939,40 @@ def create_service_tables(records: list[Record], categories: list[Category]):
         "section_year", "start_year", "end_year", "pages",
         "title_raw", "dates_raw", "pages_raw", "notes_raw",
         "category_ids", "category_labels", "macroblocks",
-        "scores", "evidence", "review_flags",
+        "scores", "evidence", "context_category_ids",
+        "context_category_labels", "context_evidence", "review_flags",
     ]
     write_csv(
         WORK_DIR / "records.csv", record_fields,
         (record_to_row(record) for record in records)
     )
 
-    active = [record for record in records if record.status == "active"]
-    unclassified = [record for record in active if not record.categories]
+    active = [record for record in records if record.status == "case"]
+    topic_unclassified = [record for record in active if not record.categories]
+    context_only = [
+        record for record in topic_unclassified if record.context_categories
+    ]
+    unclassified = [
+        record for record in topic_unclassified
+        if not record.context_categories
+    ]
     needs_review = [record for record in active if record.review_flags]
+    context_mentions = [record for record in active if record.context_categories]
     write_csv(
         WORK_DIR / "unclassified_cases.csv", record_fields,
         (record_to_row(record) for record in unclassified)
     )
     write_csv(
+        WORK_DIR / "context_only_cases.csv", record_fields,
+        (record_to_row(record) for record in context_only)
+    )
+    write_csv(
         WORK_DIR / "needs_review.csv", record_fields,
         (record_to_row(record) for record in needs_review)
+    )
+    write_csv(
+        WORK_DIR / "context_mentions.csv", record_fields,
+        (record_to_row(record) for record in context_mentions)
     )
 
     category_counts = Counter(
@@ -883,15 +981,43 @@ def create_service_tables(records: list[Record], categories: list[Category]):
     category_by_id = {category.id: category for category in categories}
     write_csv(
         WORK_DIR / "category_counts.csv",
-        ["category_id", "category_label", "macroblock", "cases", "percent_active"],
+        [
+            "category_id", "category_label", "macroblock", "cases",
+            "percent_of_analyzed_titles",
+        ],
         (
             {
                 "category_id": category.id,
                 "category_label": category.label,
                 "macroblock": category.macroblock,
                 "cases": category_counts[category.id],
-                "percent_active": (
+                "percent_of_analyzed_titles": (
                     f"{category_counts[category.id] / len(active) * 100:.2f}"
+                    if active else "0.00"
+                ),
+            }
+            for category in categories
+        ),
+    )
+
+    context_counts = Counter(
+        category_id
+        for record in active
+        for category_id in record.context_categories
+    )
+    write_csv(
+        WORK_DIR / "context_category_counts.csv",
+        [
+            "category_id", "category_label", "cases",
+            "percent_of_analyzed_titles",
+        ],
+        (
+            {
+                "category_id": category.id,
+                "category_label": category.label,
+                "cases": context_counts[category.id],
+                "percent_of_analyzed_titles": (
+                    f"{context_counts[category.id] / len(active) * 100:.2f}"
                     if active else "0.00"
                 ),
             }
@@ -938,9 +1064,13 @@ def create_service_tables(records: list[Record], categories: list[Category]):
     )
     return {
         "active": active,
+        "topic_unclassified": topic_unclassified,
+        "context_only": context_only,
         "unclassified": unclassified,
         "needs_review": needs_review,
+        "context_mentions": context_mentions,
         "category_counts": category_counts,
+        "context_counts": context_counts,
         "decade_counts": decade_counts,
         "theme_decades": theme_decades,
     }
@@ -963,9 +1093,10 @@ def write_error_log(issues: list[Issue], records: list[Record]) -> None:
         f"Дата запуску: {datetime.now():%d.%m.%Y %H:%M:%S}",
         "",
         "РЕЗЮМЕ",
-        f"Справи, включені до аналізу: {statuses['active']}",
+        f"Справи, включені до аналізу: {statuses['case']}",
         f"Вибулі записи: {statuses['withdrawn']}",
         f"Структурні заголовки років: {statuses['year_heading']}",
+        f"Загальні заголовки груп справ: {statuses['group_heading']}",
         f"Записи архівного опису: {statuses['inventory']}",
         f"Нерозпізнані рядки: {statuses['unknown']}",
         f"Помилки: {len(errors)}",
@@ -1012,7 +1143,9 @@ def write_analysis_report(
 ) -> None:
     active = table_data["active"]
     unclassified = table_data["unclassified"]
+    context_only = table_data["context_only"]
     needs_review = table_data["needs_review"]
+    context_mentions = table_data["context_mentions"]
     category_counts = table_data["category_counts"]
     status_counts = Counter(record.status for record in records)
     classified = [record for record in active if record.categories]
@@ -1040,6 +1173,8 @@ def write_analysis_report(
         "# Результати тестового аналізу фонду 230",
         "",
         f"Дата запуску: {datetime.now():%d.%m.%Y %H:%M:%S}.",
+        f"Версія скрипта: `{SCRIPT_VERSION}`. Версія словників: "
+        f"`{dictionary_version}`.",
         "Опрацьовані аркуші: "
         + ", ".join(sorted({record.sheet_name for record in records})) + ".",
         "",
@@ -1050,6 +1185,8 @@ def write_analysis_report(
         f"| Заголовки справ, включені до аналізу | {format_int(len(active))} |",
         f"| Вибулі записи | {format_int(status_counts['withdrawn'])} |",
         f"| Заголовки років | {format_int(status_counts['year_heading'])} |",
+        f"| Загальні заголовки груп справ | "
+        f"{format_int(status_counts['group_heading'])} |",
         f"| Записи про архівний опис | {format_int(status_counts['inventory'])} |",
         f"| Нерозпізнані рядки | {format_int(status_counts['unknown'])} |",
         f"| Помилки | {format_int(error_count)} |",
@@ -1072,13 +1209,19 @@ def write_analysis_report(
         "",
         "## Покриття тематичною класифікацією",
         "",
-        f"- Тематику визначено: {format_int(len(classified))} "
+        f"- Предметну тематику визначено: {format_int(len(classified))} "
         f"({percent(len(classified), len(active))}).",
-        f"- Тематику не визначено: {format_int(len(unclassified))} "
+        f"- Визначено лише контекст осіб або установ: "
+        f"{format_int(len(context_only))} "
+        f"({percent(len(context_only), len(active))}).",
+        f"- Не визначено ні тему, ні контекст: {format_int(len(unclassified))} "
         f"({percent(len(unclassified), len(active))}).",
         f"- Належить до кількох категорій: {format_int(len(multilabel))} "
         f"({percent(len(multilabel), len(active))}).",
         f"- Позначено для контекстної перевірки: {format_int(len(needs_review))}.",
+        f"- Виявлено окремі контекстні згадки осіб або установ: "
+        f"{format_int(len(context_mentions))} "
+        f"({percent(len(context_mentions), len(active))}).",
         "",
         "## Тематичні категорії",
         "",
@@ -1117,8 +1260,14 @@ def write_analysis_report(
             "- reports/error.log — перелік помилок і попереджень;",
             "- work/records.csv — усі розпізнані рядки;",
             "- work/unclassified_cases.csv — справи без тематичної категорії;",
+            "- work/context_only_cases.csv — справи, для яких визначено лише "
+            "контекст осіб або установ;",
             "- work/needs_review.csv — справи з неоднозначними термінами;",
+            "- work/context_mentions.csv — згадки осіб та установ, які самі "
+            "по собі не визначають тему;",
             "- work/category_counts.csv — кількість справ за категоріями;",
+            "- work/context_category_counts.csv — кількість контекстних "
+            "згадок за категоріями;",
             "- work/cases_by_decade.csv — хронологічний розподіл;",
             "- work/themes_by_decade.csv — динаміка тем за десятиліттями;",
         ]
@@ -1139,6 +1288,9 @@ def write_analysis_report(
             "## Методичне застереження",
             "",
             f"Це тестова класифікація за словниками версії {dictionary_version}. "
+            "Тематичні категорії описують предмет справи; назви установ, "
+            "посади та станові означення, які лише називають учасника або "
+            "автора документа, винесено в окремі контекстні мітки. "
             "Перед використанням числових результатів у дисертації потрібно "
             "перевірити needs_review.csv та unclassified_cases.csv, "
             "після чого скоригувати словники.",
@@ -1205,12 +1357,16 @@ def create_figures(plt, records, categories, table_data) -> bool:
     save_figure(plt, "thematic_categories")
 
     classified_count = sum(bool(record.categories) for record in active)
-    unclassified_count = len(active) - classified_count
+    context_only_count = sum(
+        not record.categories and bool(record.context_categories)
+        for record in active
+    )
+    unclassified_count = len(active) - classified_count - context_only_count
     plt.figure(figsize=(7, 4.8))
     bars = plt.bar(
-        ["Тематику визначено", "Тематику не визначено"],
-        [classified_count, unclassified_count],
-        color=["#4472c4", "#c55a11"],
+        ["Предметну тему\nвизначено", "Лише контекст", "Не визначено"],
+        [classified_count, context_only_count, unclassified_count],
+        color=["#4472c4", "#70ad47", "#c55a11"],
     )
     plt.title("Покриття класифікаційними словниками")
     plt.ylabel("Кількість справ")
@@ -1222,14 +1378,14 @@ def create_figures(plt, records, categories, table_data) -> bool:
     plt.figure(figsize=(7, 4.8))
     bars = plt.bar(
         ["Включено до аналізу", "Вибулі"],
-        [status_counts["active"], status_counts["withdrawn"]],
+        [status_counts["case"], status_counts["withdrawn"]],
         color=["#2f6b55", "#9b4a4a"],
     )
     plt.title("Справи, включені до аналізу, та вибулі записи")
     plt.ylabel("Кількість записів")
     plt.bar_label(bars, padding=3)
     plt.grid(axis="y", alpha=0.25)
-    save_figure(plt, "active_and_withdrawn")
+    save_figure(plt, "included_and_withdrawn")
 
     if decades and ordered:
         category_ids = [category_id for category_id, _ in ordered]
@@ -1262,11 +1418,13 @@ def print_summary(records, issues, table_data, figures_created) -> None:
     active = table_data["active"]
     classified = sum(bool(record.categories) for record in active)
     print("\nАНАЛІЗ ЗАВЕРШЕНО")
-    print(f"Справи в аналізі:        {statuses['active']}")
+    print(f"Справи в аналізі:        {statuses['case']}")
     print(f"Вибулі записи:           {statuses['withdrawn']}")
-    print(f"Тематику визначено:      {classified}")
-    print(f"Тематику не визначено:   {len(table_data['unclassified'])}")
+    print(f"Предметну тему визначено:{classified:>7}")
+    print(f"Лише контекст:           {len(table_data['context_only']):>7}")
+    print(f"Не визначено:            {len(table_data['unclassified']):>7}")
     print(f"Потребують перегляду:    {len(table_data['needs_review'])}")
+    print(f"Контекстні згадки:       {len(table_data['context_mentions'])}")
     print(f"Помилки:                 {errors}")
     print(f"Попередження:            {warnings}")
     print(f"Графіки створено:        {'так' if figures_created else 'ні'}")
@@ -1279,7 +1437,10 @@ def print_summary(records, issues, table_data, figures_created) -> None:
 
 
 def main() -> None:
-    print("=== АНАЛІЗ АРХІВНОГО ОПИСУ ФОНДУ 230 ===")
+    print(
+        f"=== АНАЛІЗ АРХІВНОГО ОПИСУ ФОНДУ 230 "
+        f"— {SCRIPT_VERSION} ==="
+    )
     print(f"Папка скрипта: {BASE_DIR}")
     print(f"Вхідний файл:  {INPUT_FILE}")
     print(f"Аркуші:        {', '.join(SHEET_NAMES)}")
