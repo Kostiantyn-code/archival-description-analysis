@@ -1,0 +1,34 @@
+schema_version: '1.0'
+sheets:
+  Опис 1:
+    source_id: damo230
+    archive: ДАМО
+    fond: '230'
+    inventory: '1'
+    language: uk
+  Опис 2:
+    source_id: damo230
+    archive: ДАМО
+    fond: '230'
+    inventory: '2'
+    language: uk
+  Опис 3:
+    source_id: damo230
+    archive: ДАМО
+    fond: '230'
+    inventory: '3'
+    language: uk
+  Опис 4:
+    source_id: damo230
+    archive: ДАМО
+    fond: '230'
+    inventory: '4'
+    language: uk
+  ЦДІАК:
+    source_id: cdiak356
+    archive: ЦДІАК України
+    fond: '356'
+    inventory: '' # Номер опису не підтверджений заголовком аркуша.
+    language: ru
+    pages_expected: false # Пропуски зведено у звіт, заповнені значення перевіряються.
+    skip_header_checks: [2, 5] # B1 — назва фонду; стовпець приміток не підписаний.

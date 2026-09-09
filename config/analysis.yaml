@@ -1,0 +1,22 @@
+schema_version: "1.0"
+input_file: "input.xlsx"
+output_root: "outputs"
+
+chronology:
+  minimum_year: 1790
+  maximum_year: 1911
+
+exports:
+  enabled: true
+  source_columns: 5
+  keep_all_configured_sheets: true
+  xlsx: true
+  csv: true
+  unclassified_file: "некласифіковані.xlsx"
+  service_records_file: "службові_записи.xlsx"
+  unclassified_definition: "no_subject_category"
+
+results:
+  preserve_previous_runs: true
+  per_source_reports: true
+  combined_report: true

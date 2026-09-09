@@ -1,0 +1,14 @@
+schema_version: '1.1'
+rules:
+  - term: судно
+    do_not_assign: [law_and_police]
+  - term: освещение
+    do_not_assign: [education]
+  - term: общество
+    conditional:
+      culture: [литературный, музыкальный, драматический, научный]
+      economy: [кредитный, торговый, промышленный, акционерный]
+  - term: духовный
+    exclude_for_religion: [духовное завещание]
+  - term: книга
+    exclude_for_culture: [метрическая книга, книга учета, шнуровая книга]

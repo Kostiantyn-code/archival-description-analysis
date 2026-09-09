@@ -1,15 +1,15 @@
 schema_version: "1.0"
-dictionary_version: "0.5-draft"
+dictionary_version: "0.6-draft"
 corpus:
-  title: "Фонд 230, описи 1–4"
-  sheets: ["Опис 1", "Опис 2", "Опис 3", "Опис 4"]
-  titles_in_analysis: 11980
-  accessed: "2026-09-04"
+  title: "ДАМО ф.230 та ЦДІАК України ф.356"
+  sheets: ["Опис 1", "Опис 2", "Опис 3", "Опис 4", "ЦДІАК"]
+  languages: [uk, ru]
+  accessed: "2026-09-08"
 classification:
   multi_label: true
   minimum_score: 3
   phrase_match: "normalized_exact_phrase"
-  term_match: "lemma_exact"
+  term_match: "language_specific_light_stem_exact"
   context_mentions: true
   context_policy: "Особи, посади й установи не визначають тему без предметної ознаки."
 macroblocks:

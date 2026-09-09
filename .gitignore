@@ -216,3 +216,13 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Archival description analysis: local corpus and generated artifacts
+.idea/
+input.xlsx
+outputs/
+work/
+reports/
+figures/
+docs/source_values.json
+*.zip

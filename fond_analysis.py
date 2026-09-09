@@ -1,6 +1,11 @@
 from __future__ import annotations
 
 import csv
+import hashlib
+import json
+import platform
+from copy import copy
+from contextvars import ContextVar
 import re
 import statistics
 import sys
@@ -15,14 +20,23 @@ from typing import Any, Iterable
 
 
 BASE_DIR = Path(__file__).resolve().parent
-SCRIPT_VERSION = "0.5-draft"
+SCRIPT_VERSION = "0.7-draft"
+CONFIG_DIR = BASE_DIR / "config"
 INPUT_FILE = BASE_DIR / "input.xlsx"
 DICTIONARIES_DIR = BASE_DIR / "dictionaries"
-REPORTS_DIR = BASE_DIR / "reports"
-FIGURES_DIR = BASE_DIR / "figures"
-WORK_DIR = BASE_DIR / "work"
+OUTPUTS_DIR = BASE_DIR / "outputs"
+RUN_DIR = OUTPUTS_DIR
+REPORTS_DIR = RUN_DIR / "reports"
+FIGURES_DIR = RUN_DIR / "figures"
+WORK_DIR = RUN_DIR / "tables"
+THEMATIC_DIR = RUN_DIR / "thematic_exports"
 
-SHEET_NAMES = ("Опис 1", "Опис 2", "Опис 3", "Опис 4")
+SHEET_NAMES = ("Опис 1", "Опис 2", "Опис 3", "Опис 4", "ЦДІАК")
+SOURCE_CONFIG: dict[str, dict[str, Any]] = {}
+ANALYSIS_CONFIG: dict[str, Any] = {}
+MATCH_LANGUAGE = ContextVar("match_language", default="uk")
+LANGUAGE_CATEGORIES: dict[str, list] = {}
+LANGUAGE_AMBIGUITIES: dict[str, list] = {}
 MIN_ALLOWED_YEAR = 1790
 MAX_ALLOWED_YEAR = 1911
 
@@ -81,6 +95,7 @@ class Category:
     context_rules: list[dict[str, Any]]
     exclude_phrases: list[str]
     review_terms: list[str]
+    export_filename: str = ""
 
 
 @dataclass
@@ -95,6 +110,14 @@ class Record:
     notes_raw: str
     status: str
     section_year: int | None
+    source_archive: str = ""
+    source_fond: str = ""
+    source_inventory: str = ""
+    source_id: str = ""
+    language: str = "uk"
+    detected_language: str = "undetermined"
+    language_source: str = "sheet_setting"
+    section_label: str = ""
     start_year: int | None = None
     end_year: int | None = None
     pages: int | None = None
@@ -116,13 +139,13 @@ YEAR_HEADING_RE = re.compile(
     r"^\s*"
     r"((?:17|18|19|20)\d{2}"
     r"(?:\s*(?:,|;|/|-|і|та)\s*(?:17|18|19|20)\d{2})*)"
-    r"\s*(?:рік|роки|років|рр?)\.?\s*$",
+    r"\s*(?:рік|роки|років|рр?|год|годы|годов|гг?)?\.?\s*$",
     re.I,
 )
 YEAR_RE = re.compile(r"(?<!\d)((?:17|18|19|20)\d{2})(?!\d)")
 LONG_NUMBER_RE = re.compile(r"(?<!\d)\d{5,}(?!\d)")
 WITHDRAWN_RE = re.compile(
-    r"^в\s*и\s*б\s*у\s*л\s*[аио](?=$|[\s.,;:—-])",
+    r"^(?:в\s*и\s*б\s*у\s*л\s*[аио]|в\s*ы\s*б\s*ы\s*л\s*[аои])(?=$|[\s.,;:—-])",
     re.I,
 )
 
@@ -175,8 +198,14 @@ def tokenize(text: str) -> list[str]:
     return WORD_RE.findall(normalized)
 
 
-@lru_cache(maxsize=100_000)
 def light_stem_word(word: str) -> str:
+    if MATCH_LANGUAGE.get() == "ru":
+        return russian_stem_word(word)
+    return ukrainian_stem_word(word)
+
+
+@lru_cache(maxsize=100_000)
+def ukrainian_stem_word(word: str) -> str:
     word = normalize_text(word)
     if "-" in word:
         return "-".join(light_stem_word(part) for part in word.split("-") if part)
@@ -256,9 +285,17 @@ def stem_tokens(text: str) -> list[str]:
     return [light_stem_word(word) for word in tokenize(text)]
 
 
-@lru_cache(maxsize=None)
+@lru_cache(maxsize=30000)
+def cached_item_tokens(item: str, language: str) -> tuple[str, ...]:
+    token = MATCH_LANGUAGE.set(language)
+    try:
+        return tuple(stem_tokens(item))
+    finally:
+        MATCH_LANGUAGE.reset(token)
+
+
 def item_tokens(item: str) -> list[str]:
-    return stem_tokens(item)
+    return list(cached_item_tokens(item, MATCH_LANGUAGE.get()))
 
 
 def find_phrase_positions(tokens: list[str], phrase: list[str]) -> list[int]:
@@ -308,6 +345,98 @@ def normalize_case_id(value: str) -> str:
     return result
 
 
+# Легкий стемінг, НЕ повна лематизація. Мовні кеші ізольовано.
+RU_ENDINGS = sorted({
+    "иями", "иями", "иям", "ием", "ией", "ие", "ия", "ии", "ями", "ами", "ого", "ему", "ому", "ыми", "ими", "иях",
+    "ов", "ев", "ей", "ам", "ям", "ах", "ях", "ом", "ем", "ий", "ый",
+    "ой", "ая", "яя", "ое", "ее", "ые", "ие", "ую", "юю", "ых", "их",
+    "ым", "им", "ою", "ею", "а", "я", "у", "ю", "ы", "и", "е", "о", "ь"
+}, key=lambda s: (-len(s), s))
+
+
+@lru_cache(maxsize=100000)
+def russian_stem_word(word: str) -> str:
+    word = normalize_text(word).replace("ё", "е")
+    if word in {"режим", "режима", "режиме", "режиму", "режимом", "режимы", "режимов"}:
+        return "режим"
+    if re.fullmatch(r"погром(?:а|у|е|ом|ы|ов|ам|ами|ах)?", word):
+        return "погром"
+    if "-" in word:
+        return "-".join(russian_stem_word(x) for x in word.split("-"))
+    if len(word) <= 3 or word.isdigit():
+        return word
+    for ending in RU_ENDINGS:
+        if word.endswith(ending) and len(word)-len(ending) >= 3:
+            word = word[:-len(ending)]
+            break
+    return {"купец": "купц", "мещанин": "мещан", "крестьянин": "крестьян",
+            "дворянин": "дворян", "дет": "ребенок", "дети": "ребенок",
+            "люд": "лиц", "суден": "судн", "снимок": "снимк",
+            "церкв": "церк", "издержек": "издержк"}.get(word, word)
+
+
+def detect_title_language(title: str) -> str:
+    """Контрольна евристика; власні назви не змінюють налаштування аркуша."""
+    tokens = tokenize(title)
+    uk = sum(bool(re.search("[іїєґ]", w)) for w in tokens)
+    ru = sum(bool(re.search("[ыэёъ]", w)) for w in tokens)
+    uk += sum(w in {"справа", "про", "щодо", "з", "та", "відомості", "наказ"} for w in tokens)
+    ru += sum(w in {"дело", "об", "переписка", "с", "при", "сведений", "рапорт"} for w in tokens)
+    if uk >= 3 and ru >= 3:
+        return "mixed"
+    if uk >= 2 and uk > ru * 2:
+        return "uk"
+    if ru >= 2 and ru > uk * 2:
+        return "ru"
+    return "undetermined"
+
+
+def config_path(name: str, legacy: Path | None = None) -> Path:
+    """Повертає канонічний конфіг, залишаючи читання старої структури."""
+    preferred = CONFIG_DIR / name
+    if preferred.exists():
+        return preferred
+    if legacy is not None and legacy.exists():
+        return legacy
+    return preferred
+
+
+def configure_analysis(yaml_module) -> None:
+    global ANALYSIS_CONFIG, INPUT_FILE, OUTPUTS_DIR
+    global MIN_ALLOWED_YEAR, MAX_ALLOWED_YEAR
+    path = config_path("analysis.yaml")
+    config = safe_load_yaml(path, yaml_module)
+    ANALYSIS_CONFIG = config
+
+    input_name = str(config.get("input_file", "input.xlsx"))
+    output_name = str(config.get("output_root", "outputs"))
+    input_path = Path(input_name)
+    output_path = Path(output_name)
+    INPUT_FILE = input_path if input_path.is_absolute() else BASE_DIR / input_path
+    OUTPUTS_DIR = output_path if output_path.is_absolute() else BASE_DIR / output_path
+
+    chronology = config.get("chronology", {})
+    MIN_ALLOWED_YEAR = int(chronology.get("minimum_year", 1790))
+    MAX_ALLOWED_YEAR = int(chronology.get("maximum_year", 1911))
+    if MIN_ALLOWED_YEAR > MAX_ALLOWED_YEAR:
+        raise ValueError("config/analysis.yaml: minimum_year більший за maximum_year")
+
+
+def configure_sources(yaml_module) -> None:
+    global SOURCE_CONFIG, SHEET_NAMES
+    source_path = config_path("sources.yaml", BASE_DIR / "sources.yaml")
+    config = safe_load_yaml(source_path, yaml_module)
+    SOURCE_CONFIG = config.get("sheets", {})
+    if not SOURCE_CONFIG:
+        raise ValueError("sources.yaml: немає налаштованих аркушів")
+    for name, item in SOURCE_CONFIG.items():
+        if item.get("language") not in {"uk", "ru"}:
+            raise ValueError(f"Непідтримувана мова: {name}")
+        if not re.fullmatch(r"[a-z0-9_-]+", item.get("source_id", "")):
+            raise ValueError(f"Небезпечний або порожній source_id: {name}")
+    SHEET_NAMES = tuple(SOURCE_CONFIG)
+
+
 def safe_load_yaml(path: Path, yaml_module) -> dict[str, Any]:
     with path.open("r", encoding="utf-8") as stream:
         data = yaml_module.safe_load(stream)
@@ -320,10 +449,13 @@ def ensure_directories() -> None:
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
     WORK_DIR.mkdir(parents=True, exist_ok=True)
+    THEMATIC_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def load_dictionaries(yaml_module):
-    index_path = DICTIONARIES_DIR / "categories.yaml"
+def load_dictionaries(yaml_module, language="uk"):
+    index_path = config_path(
+        "categories.yaml", DICTIONARIES_DIR / "categories.yaml"
+    )
     if not index_path.exists():
         raise FileNotFoundError(
             f"Не знайдено {index_path}. Папка dictionaries має лежати поруч зі скриптом."
@@ -331,13 +463,77 @@ def load_dictionaries(yaml_module):
 
     index = safe_load_yaml(index_path, yaml_module)
     categories: list[Category] = []
-    for item in index.get("categories", []):
-        category_path = DICTIONARIES_DIR / item["file"]
+    configured_categories = index.get("categories", [])
+    if not isinstance(configured_categories, list):
+        raise ValueError(f"{index_path}: categories має бути списком")
+    macroblock_config = index.get("macroblocks", {})
+    category_ids: set[str] = set()
+    export_names: set[str] = set()
+    for item in configured_categories:
+        if not isinstance(item, dict):
+            raise ValueError(f"{index_path}: кожна категорія має бути словником")
+        if not isinstance(item.get("enabled", True), bool):
+            raise ValueError(f"{index_path}: enabled має бути true або false")
+        if not item.get("enabled", True):
+            continue
+        category_id = str(item.get("id", ""))
+        if not re.fullmatch(r"[a-z0-9_]+", category_id):
+            raise ValueError(f"Некоректний id категорії: {category_id}")
+        if category_id in category_ids:
+            raise ValueError(f"Категорія повторюється: {category_id}")
+        category_ids.add(category_id)
+        if item.get("macroblock") not in macroblock_config:
+            raise ValueError(
+                f"Невідомий макроблок для {category_id}: {item.get('macroblock')}"
+            )
+        dictionaries = item.get("dictionaries", {})
+        configured_path = dictionaries.get(language) if isinstance(dictionaries, dict) else None
+        if configured_path:
+            category_path = BASE_DIR / str(configured_path)
+        else:
+            # Сумісність із categories.yaml версій 0.3–0.6.
+            category_path = (
+                DICTIONARIES_DIR
+                / ("ru" if language == "ru" else "")
+                / item["file"]
+            )
         data = safe_load_yaml(category_path, yaml_module)
+        if data.get("id") != item["id"]:
+            raise ValueError(f"Ідентифікатор категорії не відповідає індексу: {category_path}")
+        for key in ("strong_phrases", "strong_terms", "context_only_phrases",
+                    "context_only_terms", "contextual_terms", "exclude_phrases", "review_terms"):
+            if not isinstance(data.get(key, []), list) or not all(isinstance(v, str) for v in data.get(key, [])):
+                raise ValueError(f"{category_path}: {key} має бути списком рядків")
+        if not isinstance(data.get("context_rules", []), list) or not all(
+            isinstance(rule, dict) for rule in data.get("context_rules", [])
+        ):
+            raise ValueError(f"{category_path}: context_rules має бути списком правил")
+        for rule in data.get("context_rules", []):
+            for key in ("all", "any"):
+                if key in rule and (
+                    not isinstance(rule[key], list)
+                    or not all(isinstance(value, str) for value in rule[key])
+                ):
+                    raise ValueError(
+                        f"{category_path}: {key} у context_rules має бути списком рядків"
+                    )
+        export_filename = str(
+            item.get("export", f"{item['id']}.xlsx")
+        ).strip()
+        if not re.fullmatch(r'[^<>:"/\\|?*]+\.xlsx', export_filename, re.I):
+            raise ValueError(
+                f"Некоректна назва тематичного файла: {export_filename}"
+            )
+        export_key = export_filename.casefold()
+        if export_key in export_names:
+            raise ValueError(
+                f"Назва тематичного файла повторюється: {export_filename}"
+            )
+        export_names.add(export_key)
         categories.append(
             Category(
                 id=data["id"],
-                label=data["label"],
+                label=item["label"],
                 macroblock=data["macroblock"],
                 minimum_score=int(
                     data.get(
@@ -355,19 +551,20 @@ def load_dictionaries(yaml_module):
                 context_rules=list(data.get("context_rules", [])),
                 exclude_phrases=list(data.get("exclude_phrases", [])),
                 review_terms=list(data.get("review_terms", [])),
+                export_filename=export_filename,
             )
         )
     if not categories:
         raise ValueError("У categories.yaml немає тематичних категорій.")
 
-    ambiguity_path = DICTIONARIES_DIR / "auxiliary" / "ambiguities.yaml"
+    ambiguity_path = DICTIONARIES_DIR / ("ru" if language == "ru" else "") / "auxiliary" / "ambiguities.yaml"
     ambiguities = (
         safe_load_yaml(ambiguity_path, yaml_module).get("rules", [])
         if ambiguity_path.exists()
         else []
     )
 
-    stopwords_path = DICTIONARIES_DIR / "auxiliary" / "stopwords.yaml"
+    stopwords_path = DICTIONARIES_DIR / ("ru" if language == "ru" else "") / "auxiliary" / "stopwords.yaml"
     stopword_data = (
         safe_load_yaml(stopwords_path, yaml_module)
         if stopwords_path.exists()
@@ -400,7 +597,7 @@ def detect_status(
     # пробілами: «В И Б У Л А», «В И Б У Л И», «В И Б У Л О».
     if WITHDRAWN_RE.match(title_normalized):
         return "withdrawn"
-    if title_normalized.startswith("архівний опис"):
+    if re.match(r"^(?:архівний опис|архивная опись|недействующая опись|недіючий опис)(?:\s|$|[.,])", title_normalized):
         return "inventory"
     if case_id and title:
         return "case"
@@ -408,7 +605,7 @@ def detect_status(
     # Якщо інші облікові поля такого рядка порожні, це не помилка.
     if title and not case_id and not any((dates, pages, notes)):
         return "group_heading"
-    if case_id or title:
+    if case_id or title or dates or pages or notes:
         return "unknown"
     return "empty"
 
@@ -555,6 +752,9 @@ def read_records(
         "№", "заголовок", "крайні дати", "кількість аркушів", "примітки"
     ]
     headers_by_sheet: dict[str, list[str]] = {}
+    for ignored in set(workbook.sheetnames) - set(SHEET_NAMES):
+        issues.append(Issue("WARNING", None, "", "Аркуш", ignored,
+                            "Аркуш не налаштований у sources.yaml і не включений до аналізу.", ignored))
 
     for missing_sheet in (name for name in SHEET_NAMES if name not in workbook.sheetnames):
         issues.append(
@@ -576,7 +776,11 @@ def read_records(
         ]
         headers_by_sheet[sheet_name] = actual_headers
 
+        config = SOURCE_CONFIG.get(sheet_name, {})
+        current_section_label = ""
         for column, expected in enumerate(expected_headers, start=1):
+            if column in config.get("skip_header_checks", []):
+                continue
             if expected not in actual_headers[column - 1]:
                 issues.append(
                     Issue(
@@ -606,6 +810,10 @@ def read_records(
                 current_section_year = (
                     heading_years[0] if len(heading_years) == 1 else None
                 )
+                current_section_label = title_raw
+            elif status == "group_heading":
+                current_section_label = title_raw
+                current_section_year = None
 
             record = Record(
                 excel_row=excel_row,
@@ -618,6 +826,13 @@ def read_records(
                 notes_raw=notes_raw,
                 status=status,
                 section_year=current_section_year,
+                section_label=current_section_label,
+                source_archive=config.get("archive", ""),
+                source_fond=str(config.get("fond", "")),
+                source_inventory=str(config.get("inventory", "")),
+                source_id=config.get("source_id", sheet_name),
+                language=config.get("language", "uk"),
+                detected_language=detect_title_language(title_raw),
             )
 
             if status == "case":
@@ -626,7 +841,7 @@ def read_records(
                 )
                 record.pages = parse_pages(
                     pages_raw, excel_row, case_id_raw, issues, sheet_name
-                )
+                ) if pages_raw or config.get("pages_expected", True) else None
             elif status == "unknown":
                 joined = " | ".join(
                     value for value in (
@@ -701,7 +916,19 @@ def classify_title(
     categories: list[Category],
     ambiguities: list[dict[str, Any]],
     macroblock_order: list[str],
+    language: str = "uk",
 ):
+    token = MATCH_LANGUAGE.set(language)
+    try:
+        return _classify_title(
+            title, LANGUAGE_CATEGORIES.get(language, categories),
+            LANGUAGE_AMBIGUITIES.get(language, ambiguities), macroblock_order
+        )
+    finally:
+        MATCH_LANGUAGE.reset(token)
+
+
+def _classify_title(title, categories, ambiguities, macroblock_order):
     original_tokens = stem_tokens(title)
     matched_ids: list[str] = []
     matched_labels: list[str] = []
@@ -749,10 +976,14 @@ def classify_title(
         for rule in category.context_rules:
             if check_context_rule(tokens, rule):
                 score += int(rule.get("score", 3))
-                readable = " + ".join(
-                    [str(value) for value in rule.get("all", [])]
-                    + [str(value) for value in rule.get("any", [])]
-                )
+                matched_rule_items = [
+                    str(value) for value in rule.get("all", [])
+                    if contains_item(tokens, str(value))
+                ] + [
+                    str(value) for value in rule.get("any", [])
+                    if contains_item(tokens, str(value))
+                ]
+                readable = " + ".join(matched_rule_items)
                 category_evidence.append(f"правило: {readable}")
 
         for ambiguity in ambiguities:
@@ -772,7 +1003,8 @@ def classify_title(
                     f"контекст неоднозначного терміна: {term}"
                 )
 
-        if score >= category.minimum_score:
+        has_subject_evidence = any(not e.startswith("контекст:") for e in category_evidence)
+        if score >= category.minimum_score and (MATCH_LANGUAGE.get() != "ru" or has_subject_evidence):
             matched_ids.append(category.id)
             matched_labels.append(category.label)
             scores[category.id] = score
@@ -831,8 +1063,11 @@ def classify_records(
             record.context_evidence,
             record.review_flags,
         ) = classify_title(
-            record.title_raw, categories, ambiguities, macroblock_order
+            record.title_raw, categories, ambiguities, macroblock_order,
+            language=record.language
         )
+        if record.detected_language not in {"undetermined", record.language}:
+            record.review_flags.append("language_check: " + record.detected_language)
         if processed % update_every == 0 or processed == total:
             print_classification_progress(
                 processed, total, started_at, finished=processed == total
@@ -879,13 +1114,352 @@ def print_classification_progress(
     print("\r" + details.ljust(115), end="\n" if finished else "", flush=True)
 
 
-def write_csv(path: Path, fieldnames: list[str], rows: Iterable[dict[str, Any]]) -> None:
+def write_csv(path: Path, fieldnames: list[str],
+              rows: Iterable[dict[str, Any]]) -> int:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    written = 0
     with path.open("w", encoding="utf-8-sig", newline="") as stream:
         writer = csv.DictWriter(
             stream, fieldnames=fieldnames, delimiter=";", extrasaction="ignore"
         )
         writer.writeheader()
-        writer.writerows(rows)
+        for row in rows:
+            writer.writerow(row)
+            written += 1
+    return written
+
+
+def classification_type(record: Record) -> str:
+    if len(record.categories) > 1:
+        return "subject_multilabel"
+    if record.categories:
+        return "subject_single"
+    if record.context_categories:
+        return "context_only"
+    return "unclassified"
+
+
+def classification_confidence(record: Record) -> str:
+    """Описова сила правила, а не статистична ймовірність."""
+    if record.categories:
+        return "strong" if max(record.scores.values(), default=0) >= 4 else "threshold"
+    if record.context_categories:
+        return "context_only"
+    return "none"
+
+
+CLASSIFICATION_INDEX_FIELDS = [
+    "record_uid", "source", "archive", "fond", "inventory", "sheet",
+    "row_number", "case_id", "status", "title_original", "dates_original",
+    "pages_original", "notes_original", "language", "detected_language",
+    "categories", "category_labels", "classification_type",
+    "classification_confidence", "scores", "evidence", "context_categories",
+    "context_labels", "context_evidence", "section_label", "start_year",
+    "end_year", "chronology_basis",
+]
+
+
+def classification_index_row(record: Record) -> dict[str, Any]:
+    base = record_to_row(record)
+    return {
+        "record_uid": base["record_uid"],
+        "source": record.source_id,
+        "archive": record.source_archive,
+        "fond": record.source_fond,
+        "inventory": record.source_inventory,
+        "sheet": record.sheet_name,
+        "row_number": record.excel_row,
+        "case_id": record.case_id_raw,
+        "status": record.status,
+        "title_original": record.title_raw,
+        "dates_original": record.dates_raw,
+        "pages_original": record.pages_raw,
+        "notes_original": record.notes_raw,
+        "language": record.language,
+        "detected_language": record.detected_language,
+        "categories": " | ".join(record.categories),
+        "category_labels": " | ".join(record.category_labels),
+        "classification_type": classification_type(record),
+        "classification_confidence": classification_confidence(record),
+        "scores": base["scores"],
+        "evidence": base["evidence"],
+        "context_categories": " | ".join(record.context_categories),
+        "context_labels": " | ".join(record.context_category_labels),
+        "context_evidence": base["context_evidence"],
+        "section_label": record.section_label,
+        "start_year": record.start_year or "",
+        "end_year": record.end_year or "",
+        "chronology_basis": chronology_basis(record),
+    }
+
+
+def write_combined_indexes(
+    records: list[Record], categories: list[Category], tables_dir: Path
+) -> None:
+    cases = [record for record in records if record.status == "case"]
+    unclassified = [record for record in cases if not record.categories]
+    service_records = [record for record in records if record.status != "case"]
+
+    written = write_csv(
+        tables_dir / "classification_index.csv",
+        CLASSIFICATION_INDEX_FIELDS,
+        (classification_index_row(record) for record in cases),
+    )
+    if written != len(cases):
+        raise RuntimeError(
+            "classification_index.csv: записано "
+            f"{written} рядків замість {len(cases)}"
+        )
+    written = write_csv(
+        tables_dir / "unclassified_cases.csv",
+        CLASSIFICATION_INDEX_FIELDS,
+        (classification_index_row(record) for record in unclassified),
+    )
+    if written != len(unclassified):
+        raise RuntimeError(
+            "unclassified_cases.csv: записано "
+            f"{written} рядків замість {len(unclassified)}"
+        )
+
+    service_fields = [
+        "record_uid", "source", "archive", "fond", "inventory", "sheet",
+        "row_number", "case_id", "title_original", "dates_original",
+        "pages_original", "notes_original", "status", "section_label",
+    ]
+    write_csv(
+        tables_dir / "service_records.csv",
+        service_fields,
+        (
+            {
+                "record_uid": f"{r.source_id}:{r.sheet_name}:{r.excel_row}",
+                "source": r.source_id,
+                "archive": r.source_archive,
+                "fond": r.source_fond,
+                "inventory": r.source_inventory,
+                "sheet": r.sheet_name,
+                "row_number": r.excel_row,
+                "case_id": r.case_id_raw,
+                "title_original": r.title_raw,
+                "dates_original": r.dates_raw,
+                "pages_original": r.pages_raw,
+                "notes_original": r.notes_raw,
+                "status": r.status,
+                "section_label": r.section_label,
+            }
+            for r in service_records
+        ),
+    )
+
+    counts = Counter(
+        category_id for record in cases for category_id in record.categories
+    )
+    write_csv(
+        tables_dir / "thematic_summary.csv",
+        [
+            "category_id", "category_label", "macroblock", "export_file",
+            "cases", "percent_of_analyzed_titles",
+        ],
+        (
+            {
+                "category_id": category.id,
+                "category_label": category.label,
+                "macroblock": category.macroblock,
+                "export_file": category.export_filename,
+                "cases": counts[category.id],
+                "percent_of_analyzed_titles": (
+                    f"{counts[category.id] / len(cases) * 100:.2f}"
+                    if cases else "0.00"
+                ),
+            }
+            for category in categories
+        ),
+    )
+
+
+def copy_cell(source_cell, target_cell) -> None:
+    target_cell.value = source_cell.value
+    if source_cell.has_style:
+        target_cell._style = copy(source_cell._style)
+    if source_cell.number_format:
+        target_cell.number_format = source_cell.number_format
+    if source_cell.alignment:
+        target_cell.alignment = copy(source_cell.alignment)
+    if source_cell.protection:
+        target_cell.protection = copy(source_cell.protection)
+    if source_cell.hyperlink:
+        target_cell._hyperlink = copy(source_cell.hyperlink)
+    if source_cell.comment:
+        target_cell.comment = copy(source_cell.comment)
+
+
+def copy_source_row(source_sheet, target_sheet, source_row: int,
+                    target_row: int, max_columns: int) -> None:
+    for column in range(1, max_columns + 1):
+        copy_cell(
+            source_sheet.cell(source_row, column),
+            target_sheet.cell(target_row, column),
+        )
+    source_dimension = source_sheet.row_dimensions[source_row]
+    if source_dimension.height is not None:
+        target_sheet.row_dimensions[target_row].height = source_dimension.height
+
+
+def create_filtered_workbook(
+    openpyxl_module,
+    source_workbook,
+    records: list[Record],
+    output_path: Path,
+    max_columns: int,
+) -> None:
+    workbook = openpyxl_module.Workbook()
+    workbook.remove(workbook.active)
+    by_sheet: dict[str, list[Record]] = defaultdict(list)
+    for record in records:
+        by_sheet[record.sheet_name].append(record)
+
+    for sheet_name in SHEET_NAMES:
+        target_sheet = workbook.create_sheet(sheet_name)
+        source_sheet = (
+            source_workbook[sheet_name]
+            if sheet_name in source_workbook.sheetnames else None
+        )
+        if source_sheet is not None:
+            copy_source_row(source_sheet, target_sheet, 1, 1, max_columns)
+            for column in range(1, max_columns + 1):
+                letter = openpyxl_module.utils.get_column_letter(column)
+                source_width = source_sheet.column_dimensions[letter].width
+                if source_width is not None:
+                    target_sheet.column_dimensions[letter].width = source_width
+            target_sheet.sheet_view.showGridLines = source_sheet.sheet_view.showGridLines
+        else:
+            fallback_headers = [
+                "№ з/п", "Заголовок справи", "Крайні дати документів справи",
+                "Кількість аркушів у справі", "Примітки",
+            ]
+            for column, value in enumerate(fallback_headers[:max_columns], start=1):
+                target_sheet.cell(1, column, value)
+
+        target_row = 2
+        for record in sorted(by_sheet.get(sheet_name, []), key=lambda r: r.excel_row):
+            if source_sheet is not None:
+                copy_source_row(
+                    source_sheet, target_sheet, record.excel_row,
+                    target_row, max_columns,
+                )
+            else:
+                values = [
+                    record.case_id_raw, record.title_raw, record.dates_raw,
+                    record.pages_raw, record.notes_raw,
+                ]
+                for column, value in enumerate(values[:max_columns], start=1):
+                    target_sheet.cell(target_row, column, value)
+            target_row += 1
+
+        target_sheet.freeze_panes = "A2"
+        if target_row > 2:
+            last_column = openpyxl_module.utils.get_column_letter(max_columns)
+            target_sheet.auto_filter.ref = f"A1:{last_column}{target_row - 1}"
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    workbook.save(output_path)
+    workbook.close()
+
+
+def export_thematic_selections(
+    openpyxl_module, records: list[Record], categories: list[Category]
+) -> list[dict[str, Any]]:
+    exports = ANALYSIS_CONFIG.get("exports", {})
+    if not exports.get("enabled", True):
+        print("   Тематичний експорт вимкнено у config/analysis.yaml.")
+        return []
+
+    max_columns = int(exports.get("source_columns", 5))
+    if not 1 <= max_columns <= 26:
+        raise ValueError("exports.source_columns має бути в межах 1–26")
+    create_xlsx = bool(exports.get("xlsx", True))
+    create_csv = bool(exports.get("csv", True))
+    if not create_xlsx and not create_csv:
+        raise ValueError("У тематичному експорті потрібно ввімкнути XLSX або CSV")
+    cases = [record for record in records if record.status == "case"]
+    unclassified = [record for record in cases if not record.categories]
+    service_records = [record for record in records if record.status != "case"]
+
+    selections: list[tuple[str, str, list[Record]]] = [
+        (category.id, category.export_filename,
+         [r for r in cases if category.id in r.categories])
+        for category in categories
+    ]
+    selections.extend(
+        [
+            (
+                "unclassified",
+                str(exports.get("unclassified_file", "некласифіковані.xlsx")),
+                unclassified,
+            ),
+            (
+                "service_records",
+                str(exports.get("service_records_file", "службові_записи.xlsx")),
+                service_records,
+            ),
+        ]
+    )
+    export_names: set[str] = set()
+    for selection_id, filename, _ in selections:
+        if not re.fullmatch(r'[^<>:"/\\|?*]+\.xlsx', filename, re.I):
+            raise ValueError(
+                f"Некоректна назва XLSX для {selection_id}: {filename}"
+            )
+        key = filename.casefold()
+        if key in export_names:
+            raise ValueError(f"Назва тематичного файла повторюється: {filename}")
+        export_names.add(key)
+
+    source_workbook = None
+    if create_xlsx:
+        source_workbook = openpyxl_module.load_workbook(
+            INPUT_FILE, read_only=False, data_only=False
+        )
+
+    csv_dir = THEMATIC_DIR / "csv"
+    manifest_rows: list[dict[str, Any]] = []
+    total = len(selections)
+    try:
+        for index, (selection_id, filename, selected) in enumerate(selections, start=1):
+            xlsx_path = THEMATIC_DIR / filename
+            if create_xlsx:
+                create_filtered_workbook(
+                    openpyxl_module, source_workbook, selected,
+                    xlsx_path, max_columns,
+                )
+            if create_csv:
+                write_csv(
+                    csv_dir / f"{Path(filename).stem}.csv",
+                    CLASSIFICATION_INDEX_FIELDS,
+                    (classification_index_row(record) for record in selected),
+                )
+            manifest_rows.append(
+                {
+                    "selection_id": selection_id,
+                    "xlsx_file": filename if create_xlsx else "",
+                    "csv_file": f"csv/{Path(filename).stem}.csv" if create_csv else "",
+                    "records": len(selected),
+                }
+            )
+            print(
+                f"\r   Тематичні файли: {index}/{total} — {filename} "
+                f"({format_count(len(selected))} записів)".ljust(115),
+                end="\n" if index == total else "", flush=True,
+            )
+    finally:
+        if source_workbook is not None:
+            source_workbook.close()
+
+    write_csv(
+        THEMATIC_DIR / "export_manifest.csv",
+        ["selection_id", "xlsx_file", "csv_file", "records"],
+        manifest_rows,
+    )
+    return manifest_rows
 
 
 def record_to_row(record: Record) -> dict[str, Any]:
@@ -901,6 +1475,17 @@ def record_to_row(record: Record) -> dict[str, Any]:
         for category_id, values in record.context_evidence.items()
     )
     return {
+        "record_uid": f"{record.source_id}:{record.sheet_name}:{record.excel_row}",
+        "source_archive": record.source_archive,
+        "source_fond": record.source_fond,
+        "source_inventory": record.source_inventory,
+        "source_id": record.source_id,
+        "language": record.language,
+        "detected_language": record.detected_language,
+        "language_source": record.language_source,
+        "title_normalized": normalize_text(record.title_raw),
+        "section_label": record.section_label,
+        "chronology_basis": chronology_basis(record),
         "sheet_name": record.sheet_name,
         "excel_row": record.excel_row,
         "case_id_raw": record.case_id_raw,
@@ -928,13 +1513,28 @@ def record_to_row(record: Record) -> dict[str, Any]:
     }
 
 
+def chronology_basis(record: Record) -> str:
+    if record.start_year is not None:
+        if (not MIN_ALLOWED_YEAR <= record.start_year <= MAX_ALLOWED_YEAR
+                or (record.end_year is not None and
+                    (record.end_year < record.start_year or not MIN_ALLOWED_YEAR <= record.end_year <= MAX_ALLOWED_YEAR))):
+            return "invalid_dates"
+        return "dates_field"
+    return "section_heading" if record.section_year else "unknown"
+
+
 def get_decade(record: Record) -> int | None:
+    if chronology_basis(record) == "invalid_dates":
+        return None
     year = record.start_year or record.section_year
     return year // 10 * 10 if year is not None else None
 
 
 def create_service_tables(records: list[Record], categories: list[Category]):
     record_fields = [
+        "record_uid", "source_archive", "source_fond", "source_inventory", "source_id",
+        "language", "detected_language", "language_source", "title_normalized",
+        "section_label", "chronology_basis",
         "sheet_name", "excel_row", "case_id_raw", "case_id_normalized", "status",
         "section_year", "start_year", "end_year", "pages",
         "title_raw", "dates_raw", "pages_raw", "notes_raw",
@@ -949,6 +1549,10 @@ def create_service_tables(records: list[Record], categories: list[Category]):
 
     active = [record for record in records if record.status == "case"]
     topic_unclassified = [record for record in active if not record.categories]
+    write_csv(
+        WORK_DIR / "topic_unclassified_cases.csv", record_fields,
+        (record_to_row(record) for record in topic_unclassified)
+    )
     context_only = [
         record for record in topic_unclassified if record.context_categories
     ]
@@ -1029,6 +1633,10 @@ def create_service_tables(records: list[Record], categories: list[Category]):
         decade for record in active
         if (decade := get_decade(record)) is not None
     )
+    chronology_counts = Counter((get_decade(r), chronology_basis(r)) for r in active)
+    write_csv(WORK_DIR / "chronology_sources.csv", ["decade", "basis", "titles"],
+              ({"decade": decade if decade is not None else "", "basis": basis, "titles": count}
+               for (decade, basis), count in sorted(chronology_counts.items(), key=lambda x: (x[0][0] or 0, x[0][1]))))
     write_csv(
         WORK_DIR / "cases_by_decade.csv",
         ["decade", "cases"],
@@ -1170,7 +1778,7 @@ def write_analysis_report(
         return f"{value:,}".replace(",", " ")
 
     lines = [
-        "# Результати тестового аналізу фонду 230",
+        "# Результати аналізу архівних описів",
         "",
         f"Дата запуску: {datetime.now():%d.%m.%Y %H:%M:%S}.",
         f"Версія скрипта: `{SCRIPT_VERSION}`. Версія словників: "
@@ -1197,7 +1805,10 @@ def write_analysis_report(
         f"- Розпізнаний діапазон років: "
         f"{min(years) if years else '—'}–{max(years) if years else '—'}.",
         f"- Справ із розпізнаною кількістю аркушів: {format_int(len(pages))}.",
-        f"- Загальна кількість аркушів: {format_int(sum(pages))}.",
+        f"- Сума аркушів лише за заповненими числовими значеннями: {format_int(sum(pages))}.",
+        f"- Заголовків без заповненого поля дат: {sum(not r.dates_raw for r in active)}.",
+        f"- Заголовків без розпізнаної кількості аркушів: {len(active)-len(pages)}.",
+        "- Хронологія: початковий рік із поля дат; за його відсутності — рік групового заголовка. Це різні підстави, позначені в records.csv та chronology_sources.csv; рік групи не є крайньою датою справи. Зворотні діапазони та роки поза контрольними межами не включені до хронологічних графіків.",
         (
             f"- Середня кількість аркушів: {statistics.mean(pages):.2f}."
             if pages else "- Середня кількість аркушів: —."
@@ -1237,7 +1848,7 @@ def write_analysis_report(
     lines.extend(
         [
             "",
-            "Сума часток перевищує 100%, оскільки одна справа може належати "
+            "Сума часток може перевищувати 100%, оскільки одна справа може належати "
             "до кількох категорій.",
             "",
             "## Макроблоки дисертації",
@@ -1258,18 +1869,21 @@ def write_analysis_report(
             "## Створені матеріали",
             "",
             "- reports/error.log — перелік помилок і попереджень;",
-            "- work/records.csv — усі розпізнані рядки;",
-            "- work/unclassified_cases.csv — справи без тематичної категорії;",
-            "- work/context_only_cases.csv — справи, для яких визначено лише "
+            "- tables/records.csv — усі розпізнані рядки;",
+            "- tables/unclassified_cases.csv — справи без теми та контексту;",
+            "- tables/topic_unclassified_cases.csv — усі справи без предметної теми, включно з контекстними;",
+            "- tables/context_only_cases.csv — справи, для яких визначено лише "
             "контекст осіб або установ;",
-            "- work/needs_review.csv — справи з неоднозначними термінами;",
-            "- work/context_mentions.csv — згадки осіб та установ, які самі "
+            "- tables/needs_review.csv — справи з неоднозначними термінами;",
+            "- tables/context_mentions.csv — згадки осіб та установ, які самі "
             "по собі не визначають тему;",
-            "- work/category_counts.csv — кількість справ за категоріями;",
-            "- work/context_category_counts.csv — кількість контекстних "
+            "- tables/category_counts.csv — кількість справ за категоріями;",
+            "- tables/context_category_counts.csv — кількість контекстних "
             "згадок за категоріями;",
-            "- work/cases_by_decade.csv — хронологічний розподіл;",
-            "- work/themes_by_decade.csv — динаміка тем за десятиліттями;",
+            "- tables/cases_by_decade.csv — хронологічний розподіл;",
+            "- tables/themes_by_decade.csv — динаміка тем за десятиліттями;",
+            "- thematic_exports/ — похідні XLSX/CSV-вибірки за всіма "
+            "увімкненими категоріями, а також некласифіковані та службові записи.",
         ]
     )
     if figures_created:
@@ -1287,13 +1901,18 @@ def write_analysis_report(
             "",
             "## Методичне застереження",
             "",
-            f"Це тестова класифікація за словниками версії {dictionary_version}. "
+            f"Це автоматизована класифікація за словниками версії {dictionary_version}. "
             "Тематичні категорії описують предмет справи; назви установ, "
             "посади та станові означення, які лише називають учасника або "
             "автора документа, винесено в окремі контекстні мітки. "
             "Перед використанням числових результатів у дисертації потрібно "
             "перевірити needs_review.csv та unclassified_cases.csv, "
             "після чого скоригувати словники.",
+            "",
+            "Тематичні XLSX-файли є похідними дослідницькими вибірками, "
+            "а не новими архівними описами. Первинним джерелом залишається "
+            "input.xlsx. Одна справа може бути представлена у кількох файлах, "
+            "оскільки класифікація є багатозначною.",
         ]
     )
     (REPORTS_DIR / "analysis_report.md").write_text(
@@ -1337,8 +1956,8 @@ def create_figures(plt, records, categories, table_data) -> bool:
         [f"{decade}–{decade + 9}" for decade in decades],
         values, color="#315f8c",
     )
-    plt.title("Розподіл справ за десятиліттями")
-    plt.xlabel("Десятиліття")
+    plt.title("Розподіл заголовків за десятиліттями")
+    plt.xlabel("Початковий рік із дат або, за його відсутності, рік групи")
     plt.ylabel("Кількість справ")
     plt.xticks(rotation=45, ha="right")
     plt.bar_label(bars, padding=2, fontsize=8)
@@ -1432,20 +2051,30 @@ def print_summary(records, issues, table_data, figures_created) -> None:
     print(f"  {REPORTS_DIR / 'error.log'}")
     print(f"  {REPORTS_DIR / 'analysis_report.md'}")
     print(f"  {WORK_DIR / 'records.csv'}")
+    print(f"  {RUN_DIR / 'tables' / 'classification_index.csv'}")
+    print(f"  {THEMATIC_DIR}")
     if figures_created:
         print(f"  {FIGURES_DIR}")
 
 
 def main() -> None:
+    global RUN_DIR, REPORTS_DIR, FIGURES_DIR, WORK_DIR, THEMATIC_DIR
+    run_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     print(
-        f"=== АНАЛІЗ АРХІВНОГО ОПИСУ ФОНДУ 230 "
+        f"=== АНАЛІЗ АРХІВНИХ ОПИСІВ "
         f"— {SCRIPT_VERSION} ==="
     )
     print(f"Папка скрипта: {BASE_DIR}")
+    openpyxl_module, yaml_module, plt = load_dependencies()
+    configure_analysis(yaml_module)
+    configure_sources(yaml_module)
     print(f"Вхідний файл:  {INPUT_FILE}")
     print(f"Аркуші:        {', '.join(SHEET_NAMES)}")
-
-    openpyxl_module, yaml_module, plt = load_dependencies()
+    RUN_DIR = OUTPUTS_DIR / run_id
+    REPORTS_DIR = RUN_DIR / "reports"
+    FIGURES_DIR = RUN_DIR / "figures"
+    WORK_DIR = RUN_DIR / "tables"
+    THEMATIC_DIR = RUN_DIR / "thematic_exports"
     ensure_directories()
 
     print("\n1. Завантаження класифікаційних словників...")
@@ -1453,32 +2082,91 @@ def main() -> None:
         categories, ambiguities, stopwords, macroblock_labels,
         dictionary_version,
     ) = load_dictionaries(yaml_module)
+    LANGUAGE_CATEGORIES.clear()
+    LANGUAGE_AMBIGUITIES.clear()
+    LANGUAGE_CATEGORIES["uk"] = categories
+    LANGUAGE_AMBIGUITIES["uk"] = ambiguities
+    ru_categories, ru_ambiguities, _, _, _ = load_dictionaries(yaml_module, "ru")
+    LANGUAGE_CATEGORIES["ru"] = ru_categories
+    LANGUAGE_AMBIGUITIES["ru"] = ru_ambiguities
     print(f"   Завантажено категорій: {len(categories)}")
     print(f"   Завантажено стоп-слів: {len(stopwords)}")
 
     print("2. Читання та перевірка input.xlsx...")
     records, issues, _headers = read_records(openpyxl_module)
+    for source in sorted({r.source_id for r in records}):
+        subset = [r for r in records if r.source_id == source and r.status == "case"]
+        missing_pages = sum(not r.pages_raw for r in subset)
+        if subset and missing_pages and not SOURCE_CONFIG[subset[0].sheet_name].get("pages_expected", True):
+            issues.append(Issue("WARNING", None, "", "Кількість аркушів", str(missing_pages),
+                                f"{source}: кількість аркушів не заповнено у {missing_pages} заголовках; зведене попередження.", subset[0].sheet_name))
     print(f"   Розпізнано рядків: {len(records)}")
 
     print("3. Тематична класифікація...")
     macroblock_order = list(macroblock_labels)
     classify_records(records, categories, ambiguities, macroblock_order)
 
-    print("4. Створення службових таблиць...")
-    table_data = create_service_tables(records, categories)
+    roots = REPORTS_DIR, FIGURES_DIR, WORK_DIR
+    scopes = {source: [r for r in records if r.source_id == source]
+              for source in sorted({r.source_id for r in records})}
+    scopes["combined"] = records
+    summary_rows = []
+    for scope, subset in scopes.items():
+        print(f"4–7. Таблиці, графіки та звіт: {scope}...", flush=True)
+        REPORTS_DIR, FIGURES_DIR, WORK_DIR = [p / scope for p in roots]
+        ensure_directories()
+        sheets = {r.sheet_name for r in subset}
+        scoped_issues = [i for i in issues if i.sheet_name in sheets or not i.sheet_name] if scope != "combined" else issues
+        table_data = create_service_tables(subset, categories)
+        write_error_log(scoped_issues, subset)
+        figures_created = create_figures(plt, subset, categories, table_data)
+        write_analysis_report(subset, scoped_issues, categories, macroblock_labels,
+                              table_data, figures_created, dictionary_version)
+        cases = table_data["active"]
+        summary_rows.append({"source": scope, "titles": len(cases),
+                             "subject": sum(bool(r.categories) for r in cases),
+                             "context_only": len(table_data["context_only"]),
+                             "no_evidence": len(table_data["unclassified"]),
+                             "missing_dates": sum(not r.dates_raw for r in cases),
+                             "missing_pages": sum(r.pages is None for r in cases)})
+    write_csv(roots[2] / "source_summary.csv", list(summary_rows[0]), summary_rows)
+    print("8. Формування тематичних XLSX/CSV-вибірок...", flush=True)
+    write_combined_indexes(records, categories, roots[2])
+    export_manifest = export_thematic_selections(
+        openpyxl_module, records, categories
+    )
 
-    print("5. Створення error.log...")
-    write_error_log(issues, records)
-
-    print("6. Створення графіків...")
-    figures_created = create_figures(plt, records, categories, table_data)
-
-    print("7. Створення аналітичного звіту...")
-    write_analysis_report(
-        records, issues, categories, macroblock_labels,
-        table_data, figures_created, dictionary_version
+    tracked = (
+        [INPUT_FILE, Path(__file__)]
+        + sorted(CONFIG_DIR.glob("*.yaml"))
+        + sorted(DICTIONARIES_DIR.rglob("*.yaml"))
+    )
+    manifest = {
+        "status": "complete",
+        "script_version": SCRIPT_VERSION,
+        "dictionary_version": dictionary_version,
+        "run_id": run_id,
+        "completed_at": datetime.now().isoformat(timespec="seconds"),
+        "python": platform.python_version(),
+        "openpyxl": openpyxl_module.__version__,
+        "pyyaml": yaml_module.__version__,
+        "configured_sheets": list(SHEET_NAMES),
+        "enabled_categories": [category.id for category in categories],
+        "source_summary": summary_rows,
+        "thematic_exports": export_manifest,
+        "sha256": {
+            str(path.relative_to(BASE_DIR)): hashlib.sha256(
+                path.read_bytes()
+            ).hexdigest()
+            for path in tracked
+        },
+    }
+    (RUN_DIR / "run_manifest.json").write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
     )
     print_summary(records, issues, table_data, figures_created)
+    print(f"Ідентифікатор запуску: {run_id}. Старі результати збережено.")
+    print(f"Повна папка запуску:    {RUN_DIR}")
 
 
 if __name__ == "__main__":
