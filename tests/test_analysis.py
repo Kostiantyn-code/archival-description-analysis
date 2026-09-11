@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 import yaml
 from openpyxl import Workbook
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -153,7 +154,19 @@ class AnalysisTests(unittest.TestCase):
                 for name in f.SHEET_NAMES:
                     sheet = workbook.create_sheet(name)
                     sheet.append(['№ з/п', 'Заголовок справи', 'Крайні дати', 'Аркуші', 'Примітки'])
-                workbook['Опис 1'].append(['1', 'Про лікарню', '1850', '2', ''])
+                source_sheet = workbook['Опис 1']
+                header = source_sheet['A1']
+                header.font = Font(name='Arial', size=11, bold=True)
+                header.fill = PatternFill('solid', fgColor='E5EDF4')
+                header.alignment = Alignment(wrap_text=True)
+                header.border = Border(bottom=Side(style='thin', color='808080'))
+                source_sheet.row_dimensions[1].height = 26.4
+                source_sheet.column_dimensions['A'].width = 12.5
+                source_sheet.sheet_view.zoomScale = 90
+                source_sheet.freeze_panes = 'B2'
+                source_sheet.append(['1', 'Про лікарню', '1850', '2', ''])
+                source_sheet.append(['2', 'Про театр', '1851', '3', ''])
+                source_sheet['B2'].font = Font(name='Arial', italic=True)
                 input_path = directory / 'input.xlsx'
                 workbook.save(input_path)
 
@@ -177,7 +190,7 @@ class AnalysisTests(unittest.TestCase):
                 self.assertTrue((f.THEMATIC_DIR / 'службові_записи.xlsx').exists())
                 from openpyxl import load_workbook
                 result = load_workbook(
-                    f.THEMATIC_DIR / 'охорона_здоров’я.xlsx', read_only=True
+                    f.THEMATIC_DIR / 'охорона_здоров’я.xlsx', read_only=False
                 )
                 self.assertEqual(result.sheetnames, list(f.SHEET_NAMES))
                 self.assertEqual(
@@ -185,6 +198,21 @@ class AnalysisTests(unittest.TestCase):
                         for ws in result.worksheets),
                     1,
                 )
+                exported = result['Опис 1']
+                self.assertEqual(exported.max_row, 2)
+                self.assertEqual(exported['A2'].value, '1')
+                self.assertEqual(exported['B2'].value, 'Про лікарню')
+                self.assertTrue(exported['A1'].font.bold)
+                self.assertEqual(exported['A1'].font.name, 'Arial')
+                self.assertEqual(exported['A1'].fill.fill_type, 'solid')
+                self.assertEqual(exported['A1'].fill.fgColor.rgb, '00E5EDF4')
+                self.assertTrue(exported['A1'].alignment.wrap_text)
+                self.assertEqual(exported['A1'].border.bottom.style, 'thin')
+                self.assertAlmostEqual(exported.row_dimensions[1].height, 26.4)
+                self.assertAlmostEqual(exported.column_dimensions['A'].width, 12.5)
+                self.assertEqual(exported.sheet_view.zoomScale, 90)
+                self.assertEqual(exported.freeze_panes, 'B2')
+                self.assertTrue(exported['B2'].font.italic)
                 result.close()
         finally:
             f.INPUT_FILE = old_input

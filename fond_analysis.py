@@ -1278,14 +1278,15 @@ def write_combined_indexes(
 
 def copy_cell(source_cell, target_cell) -> None:
     target_cell.value = source_cell.value
-    if source_cell.has_style:
-        target_cell._style = copy(source_cell._style)
-    if source_cell.number_format:
-        target_cell.number_format = source_cell.number_format
-    if source_cell.alignment:
-        target_cell.alignment = copy(source_cell.alignment)
-    if source_cell.protection:
-        target_cell.protection = copy(source_cell.protection)
+    # Внутрішній _style містить індекси, дійсні лише для книги-джерела.
+    # У новій книзі копіюємо складові стилю окремо.
+    target_cell.font = copy(source_cell.font)
+    target_cell.fill = copy(source_cell.fill)
+    target_cell.border = copy(source_cell.border)
+    target_cell.alignment = copy(source_cell.alignment)
+    target_cell.number_format = source_cell.number_format
+    target_cell.protection = copy(source_cell.protection)
+    target_cell.quotePrefix = source_cell.quotePrefix
     if source_cell.hyperlink:
         target_cell._hyperlink = copy(source_cell.hyperlink)
     if source_cell.comment:
@@ -1300,8 +1301,14 @@ def copy_source_row(source_sheet, target_sheet, source_row: int,
             target_sheet.cell(target_row, column),
         )
     source_dimension = source_sheet.row_dimensions[source_row]
+    target_dimension = target_sheet.row_dimensions[target_row]
     if source_dimension.height is not None:
-        target_sheet.row_dimensions[target_row].height = source_dimension.height
+        target_dimension.height = source_dimension.height
+    target_dimension.hidden = source_dimension.hidden
+    target_dimension.outlineLevel = source_dimension.outlineLevel
+    target_dimension.collapsed = source_dimension.collapsed
+    target_dimension.thickTop = source_dimension.thickTop
+    target_dimension.thickBot = source_dimension.thickBot
 
 
 def create_filtered_workbook(
@@ -1327,10 +1334,27 @@ def create_filtered_workbook(
             copy_source_row(source_sheet, target_sheet, 1, 1, max_columns)
             for column in range(1, max_columns + 1):
                 letter = openpyxl_module.utils.get_column_letter(column)
-                source_width = source_sheet.column_dimensions[letter].width
+                source_dimension = source_sheet.column_dimensions[letter]
+                target_dimension = target_sheet.column_dimensions[letter]
+                source_width = source_dimension.width
                 if source_width is not None:
-                    target_sheet.column_dimensions[letter].width = source_width
+                    target_dimension.width = source_width
+                target_dimension.hidden = source_dimension.hidden
+                target_dimension.bestFit = source_dimension.bestFit
+                target_dimension.outlineLevel = source_dimension.outlineLevel
+                target_dimension.collapsed = source_dimension.collapsed
             target_sheet.sheet_view.showGridLines = source_sheet.sheet_view.showGridLines
+            target_sheet.sheet_view.zoomScale = source_sheet.sheet_view.zoomScale
+            target_sheet.sheet_view.zoomScaleNormal = (
+                source_sheet.sheet_view.zoomScaleNormal
+            )
+            target_sheet.sheet_format.defaultRowHeight = (
+                source_sheet.sheet_format.defaultRowHeight
+            )
+            target_sheet.sheet_format.defaultColWidth = (
+                source_sheet.sheet_format.defaultColWidth
+            )
+            target_sheet.freeze_panes = source_sheet.freeze_panes
         else:
             fallback_headers = [
                 "№ з/п", "Заголовок справи", "Крайні дати документів справи",
@@ -1355,8 +1379,8 @@ def create_filtered_workbook(
                     target_sheet.cell(target_row, column, value)
             target_row += 1
 
-        target_sheet.freeze_panes = "A2"
-        if target_row > 2:
+        if (source_sheet is not None and source_sheet.auto_filter.ref
+                and target_row > 2):
             last_column = openpyxl_module.utils.get_column_letter(max_columns)
             target_sheet.auto_filter.ref = f"A1:{last_column}{target_row - 1}"
 
