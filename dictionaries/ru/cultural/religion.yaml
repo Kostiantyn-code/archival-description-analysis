@@ -1,11 +1,6 @@
-schema_version: '1.1'
 id: religion
-language: ru
 macroblock: cultural
-label: Релігія і конфесійне життя
 minimum_score: 3
-provenance: 'Авторський російськомовний шар: поняттєві відповідники UK 0.5 + лексика аркуша ЦДІАК. Не офіційний
-  переклад УДК.'
 strong_phrases:
 - отречение от православия
 - переход в раскол
@@ -53,8 +48,6 @@ context_only_terms:
 contextual_terms:
 - молитва
 - религиозный
-exclude_phrases:
-- духовное завещание
 context_rules:
 - all:
   - церковь
@@ -64,8 +57,5 @@ context_rules:
   - освящение
   - богослужение
   score: 3
-udc_basis:
-- code: '2'
-  label: Релігія. Теологія
-- code: '322'
-  label: Відносини між церквою та державою
+exclude_phrases:
+- духовное завещание

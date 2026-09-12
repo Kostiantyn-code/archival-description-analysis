@@ -1,11 +1,6 @@
-schema_version: '1.1'
 id: healthcare
-language: ru
 macroblock: socioeconomic
-label: Охорона здоров’я і санітарія
 minimum_score: 3
-provenance: 'Авторський російськомовний шар: поняттєві відповідники UK 0.5 + лексика аркуша ЦДІАК. Не офіційний
-  переклад УДК.'
 strong_phrases:
 - карантинный режим
 - карантинные правила
@@ -107,8 +102,3 @@ context_rules:
   - лечение
   - осмотр
   score: 3
-udc_basis:
-- code: '61'
-  label: Медичні науки
-- code: '614'
-  label: Охорона здоров’я та гігієна

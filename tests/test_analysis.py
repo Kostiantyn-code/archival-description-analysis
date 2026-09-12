@@ -17,7 +17,7 @@ class AnalysisTests(unittest.TestCase):
     def setUpClass(cls):
         f.configure_analysis(yaml)
         f.configure_sources(yaml)
-        cls.uk, cls.amb, _, cls.mac, _ = f.load_dictionaries(yaml)
+        cls.uk, cls.amb, cls.mac, _ = f.load_dictionaries(yaml)
         ru, amb, *_ = f.load_dictionaries(yaml, 'ru')
         f.LANGUAGE_CATEGORIES.update(uk=cls.uk, ru=ru)
         f.LANGUAGE_AMBIGUITIES.update(uk=cls.amb, ru=amb)
@@ -275,3 +275,4 @@ class AnalysisTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)
+

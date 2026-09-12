@@ -1,11 +1,6 @@
-schema_version: '1.1'
 id: urban_infrastructure
-language: ru
 macroblock: socioeconomic
-label: Міське господарство та інфраструктура
 minimum_score: 3
-provenance: 'Авторський російськомовний шар: поняттєві відповідники UK 0.5 + лексика аркуша ЦДІАК. Не офіційний
-  переклад УДК.'
 strong_phrases:
 - мощение улиц
 - освещение улиц
@@ -69,12 +64,3 @@ context_rules:
   score: 3
 exclude_phrases:
 - охрана императорских железнодорожных поездов
-udc_basis:
-- code: 625/629
-  label: Транспортна техніка і споруди
-- code: '656'
-  label: Транспорт і поштовий зв'язок
-- code: '69'
-  label: Будівельна промисловість
-- code: '711'
-  label: Планування населених пунктів

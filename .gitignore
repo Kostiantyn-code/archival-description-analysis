@@ -226,3 +226,7 @@ reports/
 figures/
 docs/source_values.json
 *.zip
+
+
+# Keep the archived dictionary provenance with this version.
+!reference-materials.zip

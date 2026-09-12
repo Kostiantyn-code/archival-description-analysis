@@ -1,125 +1,99 @@
-schema_version: "1.0"
-dictionary_version: "0.7-draft"
-
-corpus:
-  title: "ДАМО ф. 230 та ЦДІАК України ф. 356"
-  languages: [uk, ru]
-
+dictionary_version: 0.7-draft
 classification:
-  multi_label: true
   minimum_score: 3
-  phrase_match: "normalized_exact_phrase"
-  term_match: "language_specific_light_stem_exact"
-  context_mentions: true
-  context_policy: "Особи, посади й установи не визначають тему без предметної ознаки."
-
 macroblocks:
   political:
-    label: "Політичне й адміністративне життя"
+    label: Політичне й адміністративне життя
   socioeconomic:
-    label: "Соціально-економічне життя"
+    label: Соціально-економічне життя
   cultural:
-    label: "Культурне життя"
-
-# Це єдиний перелік тематичних категорій для класифікації, звітів,
-# графіків і тематичного експорту. Для вимкнення категорії достатньо
-# встановити enabled: false. Python-код змінювати не потрібно.
+    label: Культурне життя
 categories:
-  - id: politics
-    label: "Політика і політичний нагляд"
-    macroblock: political
-    enabled: true
-    export: "політика.xlsx"
-    dictionaries:
-      uk: "dictionaries/political/politics.yaml"
-      ru: "dictionaries/ru/political/politics.yaml"
-
-  - id: public_administration
-    label: "Державне та місцеве управління"
-    macroblock: political
-    enabled: true
-    export: "державне_управління.xlsx"
-    dictionaries:
-      uk: "dictionaries/political/public_administration.yaml"
-      ru: "dictionaries/ru/political/public_administration.yaml"
-
-  - id: law_and_police
-    label: "Право, суд і поліція"
-    macroblock: political
-    enabled: true
-    export: "право_суд_поліція.xlsx"
-    dictionaries:
-      uk: "dictionaries/political/law_and_police.yaml"
-      ru: "dictionaries/ru/political/law_and_police.yaml"
-
-  - id: military_affairs
-    label: "Військові та військово-морські справи"
-    macroblock: political
-    enabled: true
-    export: "військова_справа.xlsx"
-    dictionaries:
-      uk: "dictionaries/political/military_affairs.yaml"
-      ru: "dictionaries/ru/political/military_affairs.yaml"
-
-  - id: economy
-    label: "Економіка, фінанси й господарство"
-    macroblock: socioeconomic
-    enabled: true
-    export: "економіка.xlsx"
-    dictionaries:
-      uk: "dictionaries/socioeconomic/economy.yaml"
-      ru: "dictionaries/ru/socioeconomic/economy.yaml"
-
-  - id: population_and_society
-    label: "Населення і соціальна сфера"
-    macroblock: socioeconomic
-    enabled: true
-    export: "населення_і_соціальні_групи.xlsx"
-    dictionaries:
-      uk: "dictionaries/socioeconomic/population_and_society.yaml"
-      ru: "dictionaries/ru/socioeconomic/population_and_society.yaml"
-
-  - id: healthcare
-    label: "Охорона здоров’я і санітарія"
-    macroblock: socioeconomic
-    enabled: true
-    export: "охорона_здоров’я.xlsx"
-    dictionaries:
-      uk: "dictionaries/socioeconomic/healthcare.yaml"
-      ru: "dictionaries/ru/socioeconomic/healthcare.yaml"
-
-  - id: urban_infrastructure
-    label: "Міське господарство та інфраструктура"
-    macroblock: socioeconomic
-    enabled: true
-    export: "міське_господарство.xlsx"
-    dictionaries:
-      uk: "dictionaries/socioeconomic/urban_infrastructure.yaml"
-      ru: "dictionaries/ru/socioeconomic/urban_infrastructure.yaml"
-
-  - id: education
-    label: "Освіта"
-    macroblock: cultural
-    enabled: true
-    export: "освіта.xlsx"
-    dictionaries:
-      uk: "dictionaries/cultural/education.yaml"
-      ru: "dictionaries/ru/cultural/education.yaml"
-
-  - id: culture
-    label: "Культура, друк і громадське життя"
-    macroblock: cultural
-    enabled: true
-    export: "культура.xlsx"
-    dictionaries:
-      uk: "dictionaries/cultural/culture.yaml"
-      ru: "dictionaries/ru/cultural/culture.yaml"
-
-  - id: religion
-    label: "Релігія і конфесійне життя"
-    macroblock: cultural
-    enabled: true
-    export: "релігія.xlsx"
-    dictionaries:
-      uk: "dictionaries/cultural/religion.yaml"
-      ru: "dictionaries/ru/cultural/religion.yaml"
+- id: politics
+  label: Політика і політичний нагляд
+  macroblock: political
+  enabled: true
+  export: політика.xlsx
+  dictionaries:
+    uk: dictionaries/political/politics.yaml
+    ru: dictionaries/ru/political/politics.yaml
+- id: public_administration
+  label: Державне та місцеве управління
+  macroblock: political
+  enabled: true
+  export: державне_управління.xlsx
+  dictionaries:
+    uk: dictionaries/political/public_administration.yaml
+    ru: dictionaries/ru/political/public_administration.yaml
+- id: law_and_police
+  label: Право, суд і поліція
+  macroblock: political
+  enabled: true
+  export: право_суд_поліція.xlsx
+  dictionaries:
+    uk: dictionaries/political/law_and_police.yaml
+    ru: dictionaries/ru/political/law_and_police.yaml
+- id: military_affairs
+  label: Військові та військово-морські справи
+  macroblock: political
+  enabled: true
+  export: військова_справа.xlsx
+  dictionaries:
+    uk: dictionaries/political/military_affairs.yaml
+    ru: dictionaries/ru/political/military_affairs.yaml
+- id: economy
+  label: Економіка, фінанси й господарство
+  macroblock: socioeconomic
+  enabled: true
+  export: економіка.xlsx
+  dictionaries:
+    uk: dictionaries/socioeconomic/economy.yaml
+    ru: dictionaries/ru/socioeconomic/economy.yaml
+- id: population_and_society
+  label: Населення і соціальна сфера
+  macroblock: socioeconomic
+  enabled: true
+  export: населення_і_соціальні_групи.xlsx
+  dictionaries:
+    uk: dictionaries/socioeconomic/population_and_society.yaml
+    ru: dictionaries/ru/socioeconomic/population_and_society.yaml
+- id: healthcare
+  label: Охорона здоров’я і санітарія
+  macroblock: socioeconomic
+  enabled: true
+  export: охорона_здоров’я.xlsx
+  dictionaries:
+    uk: dictionaries/socioeconomic/healthcare.yaml
+    ru: dictionaries/ru/socioeconomic/healthcare.yaml
+- id: urban_infrastructure
+  label: Міське господарство та інфраструктура
+  macroblock: socioeconomic
+  enabled: true
+  export: міське_господарство.xlsx
+  dictionaries:
+    uk: dictionaries/socioeconomic/urban_infrastructure.yaml
+    ru: dictionaries/ru/socioeconomic/urban_infrastructure.yaml
+- id: education
+  label: Освіта
+  macroblock: cultural
+  enabled: true
+  export: освіта.xlsx
+  dictionaries:
+    uk: dictionaries/cultural/education.yaml
+    ru: dictionaries/ru/cultural/education.yaml
+- id: culture
+  label: Культура, друк і громадське життя
+  macroblock: cultural
+  enabled: true
+  export: культура.xlsx
+  dictionaries:
+    uk: dictionaries/cultural/culture.yaml
+    ru: dictionaries/ru/cultural/culture.yaml
+- id: religion
+  label: Релігія і конфесійне життя
+  macroblock: cultural
+  enabled: true
+  export: релігія.xlsx
+  dictionaries:
+    uk: dictionaries/cultural/religion.yaml
+    ru: dictionaries/ru/cultural/religion.yaml

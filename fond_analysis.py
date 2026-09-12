@@ -5,22 +5,48 @@ import hashlib
 import json
 import platform
 from copy import copy
-from contextvars import ContextVar
 import re
 import statistics
 import sys
 import time
 import traceback
 from collections import Counter, defaultdict
-from dataclasses import dataclass, field
 from datetime import datetime
-from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable
 
 
+from models import Issue, Category, Record, CATEGORY_RULE_FIELDS
+from text_matching import (
+    MATCH_LANGUAGE,
+    WORD_RE,
+    YEAR_HEADING_RE,
+    YEAR_RE,
+    LONG_NUMBER_RE,
+    WITHDRAWN_RE,
+    STEM_ENDINGS,
+    clean_cell,
+    normalize_text,
+    tokenize,
+    UK_IRREGULAR,
+    RU_IRREGULAR,
+    light_stem_word,
+    ukrainian_stem_word,
+    stem_tokens,
+    cached_item_tokens,
+    item_tokens,
+    find_phrase_positions,
+    contains_item,
+    item_matcher,
+    mask_item,
+    normalize_case_id,
+    RU_ENDINGS,
+    russian_stem_word,
+    detect_title_language,
+)
+
 BASE_DIR = Path(__file__).resolve().parent
-SCRIPT_VERSION = "0.7-draft"
+SCRIPT_VERSION = "0.8"
 CONFIG_DIR = BASE_DIR / "config"
 INPUT_FILE = BASE_DIR / "input.xlsx"
 DICTIONARIES_DIR = BASE_DIR / "dictionaries"
@@ -34,7 +60,6 @@ THEMATIC_DIR = RUN_DIR / "thematic_exports"
 SHEET_NAMES = ("Опис 1", "Опис 2", "Опис 3", "Опис 4", "ЦДІАК")
 SOURCE_CONFIG: dict[str, dict[str, Any]] = {}
 ANALYSIS_CONFIG: dict[str, Any] = {}
-MATCH_LANGUAGE = ContextVar("match_language", default="uk")
 LANGUAGE_CATEGORIES: dict[str, list] = {}
 LANGUAGE_AMBIGUITIES: dict[str, list] = {}
 MIN_ALLOWED_YEAR = 1790
@@ -68,327 +93,6 @@ def load_dependencies():
     except ImportError:
         plt = None
     return openpyxl, yaml, plt
-
-
-@dataclass
-class Issue:
-    level: str
-    row: int | None
-    case_id: str
-    field: str
-    value: str
-    message: str
-    sheet_name: str = ""
-
-
-@dataclass
-class Category:
-    id: str
-    label: str
-    macroblock: str
-    minimum_score: int
-    strong_phrases: list[str]
-    strong_terms: list[str]
-    context_only_phrases: list[str]
-    context_only_terms: list[str]
-    contextual_terms: list[str]
-    context_rules: list[dict[str, Any]]
-    exclude_phrases: list[str]
-    review_terms: list[str]
-    export_filename: str = ""
-
-
-@dataclass
-class Record:
-    excel_row: int
-    sheet_name: str
-    case_id_raw: str
-    case_id_normalized: str
-    title_raw: str
-    dates_raw: str
-    pages_raw: str
-    notes_raw: str
-    status: str
-    section_year: int | None
-    source_archive: str = ""
-    source_fond: str = ""
-    source_inventory: str = ""
-    source_id: str = ""
-    language: str = "uk"
-    detected_language: str = "undetermined"
-    language_source: str = "sheet_setting"
-    section_label: str = ""
-    start_year: int | None = None
-    end_year: int | None = None
-    pages: int | None = None
-    categories: list[str] = field(default_factory=list)
-    category_labels: list[str] = field(default_factory=list)
-    macroblocks: list[str] = field(default_factory=list)
-    scores: dict[str, int] = field(default_factory=dict)
-    evidence: dict[str, list[str]] = field(default_factory=dict)
-    context_categories: list[str] = field(default_factory=list)
-    context_category_labels: list[str] = field(default_factory=list)
-    context_evidence: dict[str, list[str]] = field(default_factory=dict)
-    review_flags: list[str] = field(default_factory=list)
-
-
-WORD_RE = re.compile(
-    r"[0-9A-Za-zА-Яа-яІіЇїЄєҐґЁё]+(?:[-'][0-9A-Za-zА-Яа-яІіЇїЄєҐґЁё]+)*"
-)
-YEAR_HEADING_RE = re.compile(
-    r"^\s*"
-    r"((?:17|18|19|20)\d{2}"
-    r"(?:\s*(?:,|;|/|-|і|та)\s*(?:17|18|19|20)\d{2})*)"
-    r"\s*(?:рік|роки|років|рр?|год|годы|годов|гг?)?\.?\s*$",
-    re.I,
-)
-YEAR_RE = re.compile(r"(?<!\d)((?:17|18|19|20)\d{2})(?!\d)")
-LONG_NUMBER_RE = re.compile(r"(?<!\d)\d{5,}(?!\d)")
-WITHDRAWN_RE = re.compile(
-    r"^(?:в\s*и\s*б\s*у\s*л\s*[аио]|в\s*ы\s*б\s*ы\s*л\s*[аои])(?=$|[\s.,;:—-])",
-    re.I,
-)
-
-STEM_ENDINGS = sorted(
-    {
-        "остями", "істями", "остях", "істях", "остям", "істям",
-        "остей", "істей", "ості", "істю", "ість",
-        "ими", "іми", "ами", "ями",
-        "ього", "ьому", "ого", "ому",
-        "ій", "ої", "ьої", "ою", "ею", "єю",
-        "ів", "їв", "ев", "ов", "ам", "ям", "ах", "ях",
-        "ий", "им", "их", "іх", "ом", "ем",
-        "а", "я", "у", "ю", "и", "і", "ї", "е", "о",
-    },
-    key=len,
-    reverse=True,
-)
-
-
-def clean_cell(value: Any) -> str:
-    if value is None:
-        return ""
-    if isinstance(value, float) and value.is_integer():
-        return str(int(value))
-    return str(value).strip()
-
-
-def normalize_text(text: str) -> str:
-    return (
-        text.lower()
-        .replace("’", "'")
-        .replace(chr(96), "'")
-        .replace("ʼ", "'")
-        .replace("–", "-")
-        .replace("—", "-")
-        .replace("\u00a0", " ")
-    )
-
-
-def tokenize(text: str) -> list[str]:
-    normalized = normalize_text(text)
-    # У джерелі складні слова інколи набрано з пробілами біля дефіса:
-    # «військово- морський». Для зіставлення це те саме складне слово.
-    normalized = re.sub(
-        r"(?<=[A-Za-zА-Яа-яІіЇїЄєҐґЁё])\s*-\s*"
-        r"(?=[A-Za-zА-Яа-яІіЇїЄєҐґЁё])",
-        "-",
-        normalized,
-    )
-    return WORD_RE.findall(normalized)
-
-
-def light_stem_word(word: str) -> str:
-    if MATCH_LANGUAGE.get() == "ru":
-        return russian_stem_word(word)
-    return ukrainian_stem_word(word)
-
-
-@lru_cache(maxsize=100_000)
-def ukrainian_stem_word(word: str) -> str:
-    word = normalize_text(word)
-    if "-" in word:
-        return "-".join(light_stem_word(part) for part in word.split("-") if part)
-    if "'" in word:
-        return "'".join(light_stem_word(part) for part in word.split("'") if part)
-    if word.isdigit() or len(word) <= 3:
-        return word
-    for ending in STEM_ENDINGS:
-        if word.endswith(ending) and len(word) - len(ending) >= 3:
-            word = word[:-len(ending)]
-            break
-    if word.endswith("ь") and len(word) > 3:
-        word = word[:-1]
-    irregular = {
-        "купець": "купц",
-        "купец": "купц",
-        "купц": "купц",
-        "купцеві": "купц",
-        "купцев": "купц",
-        "учень": "учн",
-        "учен": "учн",
-        "учн": "учн",
-        "будинок": "будинк",
-        "осіб": "особ",
-        "особи": "особ",
-        "ділянок": "ділянк",
-        "набор": "набір",
-        "рок": "рік",
-        "шпитал": "шпиталь",
-        "суден": "судн",
-        "недоїмок": "недоїмк",
-        "угідь": "угідд",
-        "угід": "угідд",
-        "платеж": "платіж",
-        "крадіжок": "крадіжк",
-        "грабеж": "грабіж",
-        "міщанин": "міщан",
-        "міщан": "міщан",
-        "дворянин": "дворян",
-        "дворян": "дворян",
-        "селянин": "селян",
-        "селян": "селян",
-        "громадянин": "громадян",
-        "громадян": "громадян",
-        "протоієрей": "протоієр",
-        "протоієре": "протоієр",
-        "священник": "священик",
-        "священик": "священик",
-        "правлінн": "правлін",
-        "правлін": "правлін",
-        "присутствіє": "присутств",
-        "присутстві": "присутств",
-        "присутствієм": "присутств",
-        "виданн": "видан",
-        "видан": "видан",
-        "вчинен": "вчиненн",
-        "нанесен": "нанесенн",
-        "церк": "церкв",
-        "режим": "реж",
-        "позов": "поз",
-        "друкарен": "друкарн",
-        "видавец": "видавц",
-        "шкіл": "школ",
-        "збор": "збір",
-        "звод": "звід",
-        "купален": "купальн",
-        "молебн": "молебен",
-        "гулян": "гулянн",
-        "ярмарок": "ярмарк",
-        "водосток": "водостік",
-        "укріплен": "укріпленн",
-    }
-    return irregular.get(word, word)
-
-
-def stem_tokens(text: str) -> list[str]:
-    return [light_stem_word(word) for word in tokenize(text)]
-
-
-@lru_cache(maxsize=30000)
-def cached_item_tokens(item: str, language: str) -> tuple[str, ...]:
-    token = MATCH_LANGUAGE.set(language)
-    try:
-        return tuple(stem_tokens(item))
-    finally:
-        MATCH_LANGUAGE.reset(token)
-
-
-def item_tokens(item: str) -> list[str]:
-    return list(cached_item_tokens(item, MATCH_LANGUAGE.get()))
-
-
-def find_phrase_positions(tokens: list[str], phrase: list[str]) -> list[int]:
-    if not phrase or len(phrase) > len(tokens):
-        return []
-    positions: list[int] = []
-    width = len(phrase)
-    for index in range(len(tokens) - width + 1):
-        if tokens[index:index + width] == phrase:
-            positions.append(index)
-    return positions
-
-
-def contains_item(tokens: list[str], item: str) -> bool:
-    wanted = item_tokens(item)
-    if not wanted:
-        return False
-    if len(wanted) == 1:
-        return any(
-            wanted[0] == token or wanted[0] in token.split("-")
-            for token in tokens
-        )
-    return bool(find_phrase_positions(tokens, wanted))
-
-
-def mask_item(tokens: list[str], item: str) -> list[str]:
-    phrase = item_tokens(item)
-    if not phrase:
-        return tokens
-    result = list(tokens)
-    if len(phrase) == 1:
-        for index, token in enumerate(result):
-            if phrase[0] == token or phrase[0] in token.split("-"):
-                result[index] = "__masked__"
-        return result
-    for start in find_phrase_positions(result, phrase):
-        for index in range(start, start + len(phrase)):
-            result[index] = "__masked__"
-    return result
-
-
-def normalize_case_id(value: str) -> str:
-    result = normalize_text(value)
-    result = re.sub(r'["“”«»]', "", result)
-    result = re.sub(r"\s+", "", result)
-    result = re.sub(r"-+", "-", result)
-    return result
-
-
-# Легкий стемінг, НЕ повна лематизація. Мовні кеші ізольовано.
-RU_ENDINGS = sorted({
-    "иями", "иями", "иям", "ием", "ией", "ие", "ия", "ии", "ями", "ами", "ого", "ему", "ому", "ыми", "ими", "иях",
-    "ов", "ев", "ей", "ам", "ям", "ах", "ях", "ом", "ем", "ий", "ый",
-    "ой", "ая", "яя", "ое", "ее", "ые", "ие", "ую", "юю", "ых", "их",
-    "ым", "им", "ою", "ею", "а", "я", "у", "ю", "ы", "и", "е", "о", "ь"
-}, key=lambda s: (-len(s), s))
-
-
-@lru_cache(maxsize=100000)
-def russian_stem_word(word: str) -> str:
-    word = normalize_text(word).replace("ё", "е")
-    if word in {"режим", "режима", "режиме", "режиму", "режимом", "режимы", "режимов"}:
-        return "режим"
-    if re.fullmatch(r"погром(?:а|у|е|ом|ы|ов|ам|ами|ах)?", word):
-        return "погром"
-    if "-" in word:
-        return "-".join(russian_stem_word(x) for x in word.split("-"))
-    if len(word) <= 3 or word.isdigit():
-        return word
-    for ending in RU_ENDINGS:
-        if word.endswith(ending) and len(word)-len(ending) >= 3:
-            word = word[:-len(ending)]
-            break
-    return {"купец": "купц", "мещанин": "мещан", "крестьянин": "крестьян",
-            "дворянин": "дворян", "дет": "ребенок", "дети": "ребенок",
-            "люд": "лиц", "суден": "судн", "снимок": "снимк",
-            "церкв": "церк", "издержек": "издержк"}.get(word, word)
-
-
-def detect_title_language(title: str) -> str:
-    """Контрольна евристика; власні назви не змінюють налаштування аркуша."""
-    tokens = tokenize(title)
-    uk = sum(bool(re.search("[іїєґ]", w)) for w in tokens)
-    ru = sum(bool(re.search("[ыэёъ]", w)) for w in tokens)
-    uk += sum(w in {"справа", "про", "щодо", "з", "та", "відомості", "наказ"} for w in tokens)
-    ru += sum(w in {"дело", "об", "переписка", "с", "при", "сведений", "рапорт"} for w in tokens)
-    if uk >= 3 and ru >= 3:
-        return "mixed"
-    if uk >= 2 and uk > ru * 2:
-        return "uk"
-    if ru >= 2 and ru > uk * 2:
-        return "ru"
-    return "undetermined"
 
 
 def config_path(name: str, legacy: Path | None = None) -> Path:
@@ -500,8 +204,9 @@ def load_dictionaries(yaml_module, language="uk"):
         data = safe_load_yaml(category_path, yaml_module)
         if data.get("id") != item["id"]:
             raise ValueError(f"Ідентифікатор категорії не відповідає індексу: {category_path}")
-        for key in ("strong_phrases", "strong_terms", "context_only_phrases",
-                    "context_only_terms", "contextual_terms", "exclude_phrases", "review_terms"):
+        for key in CATEGORY_RULE_FIELDS:
+            if key == "context_rules":
+                continue
             if not isinstance(data.get(key, []), list) or not all(isinstance(v, str) for v in data.get(key, [])):
                 raise ValueError(f"{category_path}: {key} має бути списком рядків")
         if not isinstance(data.get("context_rules", []), list) or not all(
@@ -541,16 +246,7 @@ def load_dictionaries(yaml_module, language="uk"):
                         index.get("classification", {}).get("minimum_score", 3),
                     )
                 ),
-                strong_phrases=list(data.get("strong_phrases", [])),
-                strong_terms=list(data.get("strong_terms", [])),
-                context_only_phrases=list(
-                    data.get("context_only_phrases", [])
-                ),
-                context_only_terms=list(data.get("context_only_terms", [])),
-                contextual_terms=list(data.get("contextual_terms", [])),
-                context_rules=list(data.get("context_rules", [])),
-                exclude_phrases=list(data.get("exclude_phrases", [])),
-                review_terms=list(data.get("review_terms", [])),
+                **{key: list(data.get(key, [])) for key in CATEGORY_RULE_FIELDS},
                 export_filename=export_filename,
             )
         )
@@ -564,23 +260,12 @@ def load_dictionaries(yaml_module, language="uk"):
         else []
     )
 
-    stopwords_path = DICTIONARIES_DIR / ("ru" if language == "ru" else "") / "auxiliary" / "stopwords.yaml"
-    stopword_data = (
-        safe_load_yaml(stopwords_path, yaml_module)
-        if stopwords_path.exists()
-        else {}
-    )
-    stopwords: set[str] = set()
-    for key in ("general", "document_genres", "corpus_specific"):
-        for value in stopword_data.get(key, []):
-            stopwords.update(stem_tokens(str(value)))
-
     macroblocks = {
         key: value.get("label", key)
         for key, value in index.get("macroblocks", {}).items()
     }
     dictionary_version = str(index.get("dictionary_version", "невідома"))
-    return categories, ambiguities, stopwords, macroblocks, dictionary_version
+    return categories, ambiguities, macroblocks, dictionary_version
 
 
 def detect_status(
@@ -901,12 +586,13 @@ def global_masks_for_category(
     return result
 
 
-def check_context_rule(tokens: list[str], rule: dict[str, Any]) -> bool:
+def check_context_rule(tokens: list[str], rule: dict[str, Any], matches=None) -> bool:
+    matches = matches if matches is not None else item_matcher(tokens)
     all_items = [str(value) for value in rule.get("all", [])]
     any_items = [str(value) for value in rule.get("any", [])]
-    if all_items and not all(contains_item(tokens, item) for item in all_items):
+    if all_items and not all(matches(item) for item in all_items):
         return False
-    if any_items and not any(contains_item(tokens, item) for item in any_items):
+    if any_items and not any(matches(item) for item in any_items):
         return False
     return bool(all_items or any_items)
 
@@ -944,16 +630,16 @@ def _classify_title(title, categories, ambiguities, macroblock_order):
         for phrase in category.exclude_phrases:
             tokens = mask_item(tokens, phrase)
 
+        matches = item_matcher(tokens)
         category_context_evidence: list[str] = []
-        for phrase in category.context_only_phrases:
-            if contains_item(tokens, phrase):
-                category_context_evidence.append(f"фраза: {phrase}")
-        for term in category.context_only_terms:
-            if contains_item(tokens, term):
-                category_context_evidence.append(f"термін: {term}")
-        for term in category.contextual_terms:
-            if contains_item(tokens, term):
-                category_context_evidence.append(f"слабкий контекст: {term}")
+        for items, label in (
+            (category.context_only_phrases, "фраза"),
+            (category.context_only_terms, "термін"),
+            (category.contextual_terms, "слабкий контекст"),
+        ):
+            category_context_evidence.extend(
+                f"{label}: {item}" for item in items if matches(item)
+            )
         if category_context_evidence:
             context_ids.append(category.id)
             context_labels.append(category.label)
@@ -961,27 +647,24 @@ def _classify_title(title, categories, ambiguities, macroblock_order):
 
         score = 0
         category_evidence: list[str] = []
-        for phrase in category.strong_phrases:
-            if contains_item(tokens, phrase):
-                score += 4
-                category_evidence.append(f"фраза: {phrase}")
-        for term in category.strong_terms:
-            if contains_item(tokens, term):
-                score += 3
-                category_evidence.append(f"термін: {term}")
-        for term in category.contextual_terms:
-            if contains_item(tokens, term):
-                score += 1
-                category_evidence.append(f"контекст: {term}")
+        for items, weight, label in (
+            (category.strong_phrases, 4, "фраза"),
+            (category.strong_terms, 3, "термін"),
+            (category.contextual_terms, 1, "контекст"),
+        ):
+            for item in items:
+                if matches(item):
+                    score += weight
+                    category_evidence.append(f"{label}: {item}")
         for rule in category.context_rules:
-            if check_context_rule(tokens, rule):
+            if check_context_rule(tokens, rule, matches):
                 score += int(rule.get("score", 3))
                 matched_rule_items = [
                     str(value) for value in rule.get("all", [])
-                    if contains_item(tokens, str(value))
+                    if matches(str(value))
                 ] + [
                     str(value) for value in rule.get("any", [])
-                    if contains_item(tokens, str(value))
+                    if matches(str(value))
                 ]
                 readable = " + ".join(matched_rule_items)
                 category_evidence.append(f"правило: {readable}")
@@ -992,9 +675,9 @@ def _classify_title(title, categories, ambiguities, macroblock_order):
             if (
                 term
                 and category_context
-                and contains_item(tokens, term)
+                and matches(term)
                 and any(
-                    contains_item(tokens, str(context))
+                    matches(str(context))
                     for context in category_context
                 )
             ):
@@ -1011,7 +694,7 @@ def _classify_title(title, categories, ambiguities, macroblock_order):
             evidence[category.id] = category_evidence
         elif score >= max(1, category.minimum_score - 1):
             for review_term in category.review_terms:
-                if contains_item(tokens, review_term):
+                if matches(review_term):
                     review_flags.add(f"{category.id}: {review_term}")
 
     ordered = sorted(
@@ -1566,42 +1249,22 @@ def create_service_tables(records: list[Record], categories: list[Category]):
         "scores", "evidence", "context_category_ids",
         "context_category_labels", "context_evidence", "review_flags",
     ]
-    write_csv(
-        WORK_DIR / "records.csv", record_fields,
-        (record_to_row(record) for record in records)
-    )
-
     active = [record for record in records if record.status == "case"]
     topic_unclassified = [record for record in active if not record.categories]
-    write_csv(
-        WORK_DIR / "topic_unclassified_cases.csv", record_fields,
-        (record_to_row(record) for record in topic_unclassified)
-    )
-    context_only = [
-        record for record in topic_unclassified if record.context_categories
-    ]
-    unclassified = [
-        record for record in topic_unclassified
-        if not record.context_categories
-    ]
+    context_only = [record for record in topic_unclassified if record.context_categories]
+    unclassified = [record for record in topic_unclassified if not record.context_categories]
     needs_review = [record for record in active if record.review_flags]
     context_mentions = [record for record in active if record.context_categories]
-    write_csv(
-        WORK_DIR / "unclassified_cases.csv", record_fields,
-        (record_to_row(record) for record in unclassified)
-    )
-    write_csv(
-        WORK_DIR / "context_only_cases.csv", record_fields,
-        (record_to_row(record) for record in context_only)
-    )
-    write_csv(
-        WORK_DIR / "needs_review.csv", record_fields,
-        (record_to_row(record) for record in needs_review)
-    )
-    write_csv(
-        WORK_DIR / "context_mentions.csv", record_fields,
-        (record_to_row(record) for record in context_mentions)
-    )
+    for filename, selected in (
+        ("records.csv", records),
+        ("topic_unclassified_cases.csv", topic_unclassified),
+        ("unclassified_cases.csv", unclassified),
+        ("context_only_cases.csv", context_only),
+        ("needs_review.csv", needs_review),
+        ("context_mentions.csv", context_mentions),
+    ):
+        write_csv(WORK_DIR / filename, record_fields,
+                  (record_to_row(record) for record in selected))
 
     category_counts = Counter(
         category_id for record in active for category_id in record.categories
@@ -2103,18 +1766,17 @@ def main() -> None:
 
     print("\n1. Завантаження класифікаційних словників...")
     (
-        categories, ambiguities, stopwords, macroblock_labels,
+        categories, ambiguities, macroblock_labels,
         dictionary_version,
     ) = load_dictionaries(yaml_module)
     LANGUAGE_CATEGORIES.clear()
     LANGUAGE_AMBIGUITIES.clear()
     LANGUAGE_CATEGORIES["uk"] = categories
     LANGUAGE_AMBIGUITIES["uk"] = ambiguities
-    ru_categories, ru_ambiguities, _, _, _ = load_dictionaries(yaml_module, "ru")
+    ru_categories, ru_ambiguities, _, _ = load_dictionaries(yaml_module, "ru")
     LANGUAGE_CATEGORIES["ru"] = ru_categories
     LANGUAGE_AMBIGUITIES["ru"] = ru_ambiguities
     print(f"   Завантажено категорій: {len(categories)}")
-    print(f"   Завантажено стоп-слів: {len(stopwords)}")
 
     print("2. Читання та перевірка input.xlsx...")
     records, issues, _headers = read_records(openpyxl_module)
@@ -2161,7 +1823,7 @@ def main() -> None:
     )
 
     tracked = (
-        [INPUT_FILE, Path(__file__)]
+        [INPUT_FILE, Path(__file__), BASE_DIR / "models.py", BASE_DIR / "text_matching.py"]
         + sorted(CONFIG_DIR.glob("*.yaml"))
         + sorted(DICTIONARIES_DIR.rglob("*.yaml"))
     )
@@ -2204,3 +1866,4 @@ if __name__ == "__main__":
         print("\nТехнічні подробиці:")
         traceback.print_exc()
         raise SystemExit(1)
+
