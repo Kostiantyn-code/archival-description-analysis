@@ -1263,8 +1263,54 @@ def create_service_tables(records: list[Record], categories: list[Category]):
         ("needs_review.csv", needs_review),
         ("context_mentions.csv", context_mentions),
     ):
-        write_csv(WORK_DIR / filename, record_fields,
-                  (record_to_row(record) for record in selected))
+        written = write_csv(
+            WORK_DIR / filename,
+            record_fields,
+            (record_to_row(record) for record in selected),
+        )
+        if written != len(selected):
+            raise RuntimeError(
+                f"{filename}: записано {written} рядків замість "
+                f"{len(selected)}"
+            )
+
+    description_rows: list[dict[str, Any]] = []
+    present_sheets = {record.sheet_name for record in records}
+    ordered_sheets = [name for name in SHEET_NAMES if name in present_sheets]
+    ordered_sheets += sorted(present_sheets.difference(ordered_sheets))
+    for sheet_name in ordered_sheets:
+        sheet_records = [record for record in records if record.sheet_name == sheet_name]
+        sheet_active = [record for record in sheet_records if record.status == "case"]
+        subject = sum(bool(record.categories) for record in sheet_active)
+        context_only_count = sum(
+            not record.categories and bool(record.context_categories)
+            for record in sheet_active
+        )
+        description_rows.append(
+            {
+                "sheet_name": sheet_name,
+                "description": configured_description_label(sheet_name),
+                "cases_in_analysis": len(sheet_active),
+                "withdrawn_records": sum(
+                    record.status == "withdrawn" for record in sheet_records
+                ),
+                "subject_classified": subject,
+                "context_only": context_only_count,
+                "unclassified": len(sheet_active) - subject - context_only_count,
+                "category_assignments": sum(
+                    len(record.categories) for record in sheet_active
+                ),
+            }
+        )
+    write_csv(
+        WORK_DIR / "description_summary.csv",
+        [
+            "sheet_name", "description", "cases_in_analysis",
+            "withdrawn_records", "subject_classified", "context_only",
+            "unclassified", "category_assignments",
+        ],
+        description_rows,
+    )
 
     category_counts = Counter(
         category_id for record in active for category_id in record.categories
@@ -1368,6 +1414,7 @@ def create_service_tables(records: list[Record], categories: list[Category]):
         "context_counts": context_counts,
         "decade_counts": decade_counts,
         "theme_decades": theme_decades,
+        "description_rows": description_rows,
     }
 
 
@@ -1487,6 +1534,23 @@ def write_analysis_report(
         f"| Помилки | {format_int(error_count)} |",
         f"| Попередження | {format_int(warning_count)} |",
         "",
+        "## Розподіл за архівними описами",
+        "",
+        "| Архівний опис | Справ у аналізі | Вибулі | Предметну тему визначено | Лише контекст | Не визначено |",
+        "|---|---:|---:|---:|---:|---:|",
+    ]
+    for row in table_data["description_rows"]:
+        lines.append(
+            f"| {row['description']} | {format_int(row['cases_in_analysis'])} | "
+            f"{format_int(row['withdrawn_records'])} | "
+            f"{format_int(row['subject_classified'])} | "
+            f"{format_int(row['context_only'])} | "
+            f"{format_int(row['unclassified'])} |"
+        )
+
+    lines.extend(
+        [
+        "",
         "## Хронологічні й кількісні показники",
         "",
         f"- Розпізнаний діапазон років: "
@@ -1525,7 +1589,8 @@ def write_analysis_report(
         "",
         "| Категорія | Справ | Частка справ, включених до аналізу |",
         "|---|---:|---:|",
-    ]
+        ]
+    )
     for category_id, count in category_counts.most_common():
         lines.append(
             f"| {category_by_id[category_id].label} | "
@@ -1557,6 +1622,8 @@ def write_analysis_report(
             "",
             "- reports/error.log — перелік помилок і попереджень;",
             "- tables/records.csv — усі розпізнані рядки;",
+            "- tables/description_summary.csv — контрольні підсумки за кожним "
+            "архівним описом;",
             "- tables/unclassified_cases.csv — справи без теми та контексту;",
             "- tables/topic_unclassified_cases.csv — усі справи без предметної теми, включно з контекстними;",
             "- tables/context_only_cases.csv — справи, для яких визначено лише "
@@ -1614,6 +1681,192 @@ def save_figure(plt, name: str) -> None:
     plt.close()
 
 
+CHART_PALETTES = (
+    ("#4C78A8", "#6F98BC", "#91B5D0", "#B8D1E3", "#D8E8F5"),
+    ("#F4E0BE", "#E6BE78", "#D39B48", "#B9782C", "#92591D"),
+    ("#557A46", "#729661", "#91B181", "#B2CCAA", "#D6E5D1"),
+    ("#70477C", "#8C6797", "#AA89B3", "#C8AECF", "#E3D5E7"),
+)
+
+
+def configured_description_label(sheet_name: str) -> str:
+    """Return a complete archival reference for legends and control tables."""
+    config = SOURCE_CONFIG.get(sheet_name, {})
+    archive = clean_cell(config.get("archive")) or sheet_name
+    fond = clean_cell(config.get("fond"))
+    inventory = clean_cell(config.get("inventory"))
+    reference = archive
+    if fond:
+        reference += f", ф. {fond}"
+    if inventory:
+        reference += f": опис {inventory}"
+    elif sheet_name.lower().startswith("опис "):
+        reference += f": {sheet_name.lower()}"
+    return reference
+
+
+def chart_sheet_order(records: Iterable[Record]) -> list[str]:
+    present = {record.sheet_name for record in records}
+    configured = [name for name in SHEET_NAMES if name in present]
+    return configured + sorted(present.difference(configured))
+
+
+def chart_sheet_colors(components: Iterable[str]) -> dict[str, str]:
+    """Use one tonal family per archive while keeping descriptions distinct."""
+    components = list(components)
+    all_sheets = list(SHEET_NAMES) + sorted(
+        set(components).difference(SHEET_NAMES)
+    )
+    source_order: list[str] = []
+    source_sheets: dict[str, list[str]] = defaultdict(list)
+    for sheet_name in all_sheets:
+        source_id = SOURCE_CONFIG.get(sheet_name, {}).get("source_id", sheet_name)
+        if source_id not in source_order:
+            source_order.append(source_id)
+        source_sheets[source_id].append(sheet_name)
+
+    colors: dict[str, str] = {}
+    for source_index, source_id in enumerate(source_order):
+        palette = CHART_PALETTES[source_index % len(CHART_PALETTES)]
+        sheets = source_sheets[source_id]
+        if len(sheets) == 1:
+            shades = [palette[2]]
+        else:
+            shades = [
+                palette[round(index * (len(palette) - 1) / (len(sheets) - 1))]
+                for index in range(len(sheets))
+            ]
+        colors.update(zip(sheets, shades))
+    return {component: colors[component] for component in components}
+
+
+def build_chart_breakdowns(records, active) -> dict[str, Any]:
+    """Prepare mutually exclusive description segments for stacked charts."""
+    components = chart_sheet_order(records)
+    decades = {component: Counter() for component in components}
+    categories = {component: Counter() for component in components}
+    coverage = {component: Counter() for component in components}
+    statuses = {component: Counter() for component in components}
+
+    for record in active:
+        decade = get_decade(record)
+        if decade is not None:
+            decades[record.sheet_name][decade] += 1
+        categories[record.sheet_name].update(record.categories)
+        if record.categories:
+            coverage[record.sheet_name]["subject"] += 1
+        elif record.context_categories:
+            coverage[record.sheet_name]["context_only"] += 1
+        else:
+            coverage[record.sheet_name]["unclassified"] += 1
+
+    for record in records:
+        if record.status in {"case", "withdrawn"}:
+            statuses[record.sheet_name][record.status] += 1
+
+    return {
+        "components": components,
+        "colors": chart_sheet_colors(components),
+        "labels": {
+            component: configured_description_label(component)
+            for component in components
+        },
+        "decades": decades,
+        "categories": categories,
+        "coverage": coverage,
+        "statuses": statuses,
+    }
+
+
+def _label_color(hex_color: str) -> str:
+    color = hex_color.lstrip("#")
+    red, green, blue = (int(color[index:index + 2], 16) for index in (0, 2, 4))
+    luminance = (0.299 * red + 0.587 * green + 0.114 * blue) / 255
+    return "#202020" if luminance > 0.62 else "white"
+
+
+def _segment_labels(
+    values: list[int], totals: list[int], chart_maximum: int, horizontal: bool
+) -> list[str]:
+    minimum_scale_share = 0.018 if horizontal else 0.035
+    return [
+        str(value)
+        if (
+            value >= 10
+            and value / max(total, 1) >= 0.025
+            and value / max(chart_maximum, 1) >= minimum_scale_share
+        )
+        else ""
+        for value, total in zip(values, totals)
+    ]
+
+
+def draw_stacked_bars(
+    ax,
+    labels: list[str],
+    components: list[str],
+    values: dict[str, list[int]],
+    colors: dict[str, str],
+    component_labels: dict[str, str],
+    *,
+    horizontal: bool = False,
+) -> list[int]:
+    totals = [
+        sum(values[component][index] for component in components)
+        for index in range(len(labels))
+    ]
+    chart_maximum = max(totals, default=0)
+    offsets = [0] * len(labels)
+    for component in components:
+        segment = values[component]
+        kwargs = {
+            "label": component_labels[component],
+            "color": colors[component],
+            "edgecolor": "white",
+            "linewidth": 0.2,
+        }
+        if horizontal:
+            bars = ax.barh(labels, segment, left=offsets, **kwargs)
+        else:
+            bars = ax.bar(labels, segment, bottom=offsets, **kwargs)
+        ax.bar_label(
+            bars,
+            labels=_segment_labels(
+                segment, totals, chart_maximum, horizontal
+            ),
+            label_type="center",
+            fontsize=7,
+            color=_label_color(colors[component]),
+        )
+        offsets = [offset + value for offset, value in zip(offsets, segment)]
+
+    margin = max(chart_maximum * 0.012, 0.5)
+    for index, total in enumerate(totals):
+        if not total:
+            continue
+        total_label = f"Усього: {total}"
+        if horizontal:
+            ax.text(
+                total + margin, index, total_label,
+                va="center", fontsize=8, fontweight="bold",
+            )
+        else:
+            ax.text(
+                index, total + margin, total_label,
+                ha="center", fontsize=8, fontweight="bold",
+            )
+    ax.legend(
+        title="Архівний опис",
+        loc="lower center",
+        bbox_to_anchor=(0.5, 1.03),
+        ncol=min(len(components), 3),
+        frameon=False,
+        fontsize=8,
+        title_fontsize=8,
+    )
+    return totals
+
+
 def create_figures(plt, records, categories, table_data) -> bool:
     if plt is None:
         print(
@@ -1635,62 +1888,89 @@ def create_figures(plt, records, categories, table_data) -> bool:
     decade_counts = table_data["decade_counts"]
     theme_decades = table_data["theme_decades"]
     category_by_id = {category.id: category for category in categories}
+    breakdowns = build_chart_breakdowns(records, active)
+    components = breakdowns["components"]
+    colors = breakdowns["colors"]
+    component_labels = breakdowns["labels"]
 
     decades = sorted(decade_counts)
-    values = [decade_counts[decade] for decade in decades]
-    plt.figure(figsize=(10, 5.6))
-    bars = plt.bar(
-        [f"{decade}–{decade + 9}" for decade in decades],
-        values, color="#315f8c",
+    decade_labels = [f"{decade}–{decade + 9}" for decade in decades]
+    decade_values = {
+        component: [breakdowns["decades"][component][decade] for decade in decades]
+        for component in components
+    }
+    _, ax = plt.subplots(figsize=(10, 5.6))
+    draw_stacked_bars(
+        ax, decade_labels, components, decade_values, colors, component_labels
     )
-    plt.title("Розподіл заголовків за десятиліттями")
-    plt.xlabel("Початковий рік із дат або, за його відсутності, рік групи")
-    plt.ylabel("Кількість справ")
-    plt.xticks(rotation=45, ha="right")
-    plt.bar_label(bars, padding=2, fontsize=8)
-    plt.grid(axis="y", alpha=0.25)
+    ax.set_title("Розподіл заголовків за десятиліттями")
+    ax.set_xlabel("Початковий рік із дат або, за його відсутності, рік групи")
+    ax.set_ylabel("Кількість справ")
+    ax.tick_params(axis="x", rotation=45)
+    for label in ax.get_xticklabels():
+        label.set_ha("right")
+    ax.grid(axis="y", alpha=0.25)
+    ax.set_axisbelow(True)
     save_figure(plt, "cases_by_decade")
 
     ordered = category_counts.most_common()
-    labels = [category_by_id[item[0]].label for item in ordered][::-1]
-    counts = [item[1] for item in ordered][::-1]
-    plt.figure(figsize=(10, 6.5))
-    bars = plt.barh(labels, counts, color="#6a8f3d")
-    plt.title("Тематична структура заголовків справ")
-    plt.xlabel("Кількість справ")
-    plt.bar_label(bars, padding=3, fontsize=8)
-    plt.grid(axis="x", alpha=0.25)
+    category_ids = [item[0] for item in ordered][::-1]
+    labels = [category_by_id[category_id].label for category_id in category_ids]
+    category_values = {
+        component: [
+            breakdowns["categories"][component][category_id]
+            for category_id in category_ids
+        ]
+        for component in components
+    }
+    _, ax = plt.subplots(figsize=(10, 6.5))
+    draw_stacked_bars(
+        ax, labels, components, category_values, colors, component_labels,
+        horizontal=True,
+    )
+    ax.set_title("Тематична структура заголовків справ")
+    ax.set_xlabel("Кількість справ")
+    ax.grid(axis="x", alpha=0.25)
+    ax.set_axisbelow(True)
     save_figure(plt, "thematic_categories")
 
-    classified_count = sum(bool(record.categories) for record in active)
-    context_only_count = sum(
-        not record.categories and bool(record.context_categories)
-        for record in active
+    coverage_keys = ["subject", "context_only", "unclassified"]
+    coverage_labels = [
+        "Предметну тему\nвизначено", "Лише контекст", "Не визначено"
+    ]
+    coverage_values = {
+        component: [
+            breakdowns["coverage"][component][key] for key in coverage_keys
+        ]
+        for component in components
+    }
+    _, ax = plt.subplots(figsize=(8.4, 5.2))
+    draw_stacked_bars(
+        ax, coverage_labels, components, coverage_values, colors,
+        component_labels,
     )
-    unclassified_count = len(active) - classified_count - context_only_count
-    plt.figure(figsize=(7, 4.8))
-    bars = plt.bar(
-        ["Предметну тему\nвизначено", "Лише контекст", "Не визначено"],
-        [classified_count, context_only_count, unclassified_count],
-        color=["#4472c4", "#70ad47", "#c55a11"],
-    )
-    plt.title("Покриття класифікаційними словниками")
-    plt.ylabel("Кількість справ")
-    plt.bar_label(bars, padding=3)
-    plt.grid(axis="y", alpha=0.25)
+    ax.set_title("Покриття класифікаційними словниками")
+    ax.set_ylabel("Кількість справ")
+    ax.grid(axis="y", alpha=0.25)
+    ax.set_axisbelow(True)
     save_figure(plt, "classification_coverage")
 
-    status_counts = Counter(record.status for record in records)
-    plt.figure(figsize=(7, 4.8))
-    bars = plt.bar(
-        ["Включено до аналізу", "Вибулі"],
-        [status_counts["case"], status_counts["withdrawn"]],
-        color=["#2f6b55", "#9b4a4a"],
+    status_keys = ["case", "withdrawn"]
+    status_labels = ["Включено до аналізу", "Вибулі"]
+    status_values = {
+        component: [
+            breakdowns["statuses"][component][key] for key in status_keys
+        ]
+        for component in components
+    }
+    _, ax = plt.subplots(figsize=(8.4, 5.2))
+    draw_stacked_bars(
+        ax, status_labels, components, status_values, colors, component_labels
     )
-    plt.title("Справи, включені до аналізу, та вибулі записи")
-    plt.ylabel("Кількість записів")
-    plt.bar_label(bars, padding=3)
-    plt.grid(axis="y", alpha=0.25)
+    ax.set_title("Справи, включені до аналізу, та вибулі записи")
+    ax.set_ylabel("Кількість записів")
+    ax.grid(axis="y", alpha=0.25)
+    ax.set_axisbelow(True)
     save_figure(plt, "included_and_withdrawn")
 
     if decades and ordered:
@@ -1866,4 +2146,3 @@ if __name__ == "__main__":
         print("\nТехнічні подробиці:")
         traceback.print_exc()
         raise SystemExit(1)
-
