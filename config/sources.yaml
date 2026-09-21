@@ -28,7 +28,7 @@ sheets:
     source_id: cdiak356
     archive: ЦДІАК України
     fond: "356"
-    inventory: ""
+    inventory: "1"
     language: ru
     pages_expected: false
     skip_header_checks: [2, 5]
