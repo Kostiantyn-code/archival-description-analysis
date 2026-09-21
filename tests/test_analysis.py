@@ -260,7 +260,47 @@ class AnalysisTests(unittest.TestCase):
         self.assertEqual(f.SOURCE_CONFIG['ЦДІАК']['language'],'ru')
         self.assertEqual(f.SOURCE_CONFIG['ЦДІАК']['fond'],'356')
         self.assertEqual(f.SOURCE_CONFIG['Опис 1']['fond'],'230')
-        self.assertEqual(f.SOURCE_CONFIG['ЦДІАК']['inventory'],'')
+        self.assertEqual(f.SOURCE_CONFIG['ЦДІАК']['inventory'],'1')
+
+    def test_chart_breakdowns_and_archival_labels(self):
+        records = [
+            f.Record(2, 'Опис 1', '1', '1', 'Справа 1', '1850', '', '',
+                     'case', 1850, start_year=1850,
+                     categories=['public_administration']),
+            f.Record(3, 'Опис 2', '2', '2', 'Справа 2', '1851', '', '',
+                     'case', 1851, start_year=1851,
+                     context_categories=['economy']),
+            f.Record(4, 'Опис 3', '3', '3', 'Справа 3', '1852', '', '',
+                     'case', 1852, start_year=1852),
+            f.Record(5, 'Опис 4', '4', '4', 'В И Б У Л А', '', '', '',
+                     'withdrawn', None),
+            f.Record(2, 'ЦДІАК', '5', '5', 'Дело 5', '1860', '', '',
+                     'case', 1860, start_year=1860,
+                     categories=['economy', 'healthcare']),
+        ]
+        active = [record for record in records if record.status == 'case']
+        breakdowns = f.build_chart_breakdowns(records, active)
+
+        self.assertEqual(
+            breakdowns['components'],
+            ['Опис 1', 'Опис 2', 'Опис 3', 'Опис 4', 'ЦДІАК'],
+        )
+        self.assertEqual(
+            breakdowns['labels']['Опис 1'], 'ДАМО, ф. 230: опис 1'
+        )
+        self.assertEqual(
+            breakdowns['labels']['ЦДІАК'],
+            'ЦДІАК України, ф. 356: опис 1',
+        )
+        self.assertEqual(breakdowns['statuses']['Опис 4']['withdrawn'], 1)
+        self.assertEqual(breakdowns['coverage']['Опис 2']['context_only'], 1)
+        self.assertEqual(breakdowns['categories']['ЦДІАК']['economy'], 1)
+        self.assertEqual(
+            len(set(breakdowns['colors'].values())),
+            len(breakdowns['components']),
+        )
+        self.assertEqual(f._segment_labels([119], [123], 8571, False), [''])
+        self.assertEqual(f._segment_labels([339], [343], 343, True), ['339'])
 
     def test_chronology(self):
         r = f.Record(2,'Опис 1','1','1','Заголовок','','','','case',1850)
