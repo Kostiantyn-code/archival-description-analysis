@@ -3,6 +3,7 @@ output_root: outputs
 chronology:
   minimum_year: 1790
   maximum_year: 1911
+  maximum_span_years: 100
 exports:
   enabled: true
   source_columns: 5
