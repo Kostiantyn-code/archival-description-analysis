@@ -46,7 +46,7 @@ from text_matching import (
 )
 
 BASE_DIR = Path(__file__).resolve().parent
-SCRIPT_VERSION = "0.8"
+SCRIPT_VERSION = "0.9"
 CONFIG_DIR = BASE_DIR / "config"
 INPUT_FILE = BASE_DIR / "input.xlsx"
 DICTIONARIES_DIR = BASE_DIR / "dictionaries"
@@ -1237,6 +1237,40 @@ def get_decade(record: Record) -> int | None:
     return year // 10 * 10 if year is not None else None
 
 
+def get_year_values(record: Record) -> list[int]:
+    """Return every year represented by a case for the yearly chronology."""
+    basis = chronology_basis(record)
+    if basis in {"invalid_dates", "unknown"}:
+        return []
+    if record.start_year is None:
+        return [record.section_year] if record.section_year is not None else []
+
+    end_year = record.end_year or record.start_year
+    chronology = ANALYSIS_CONFIG.get("chronology", {})
+    maximum_span = int(chronology.get("maximum_span_years", 100))
+    if end_year - record.start_year > maximum_span:
+        return [record.start_year]
+    return list(range(record.start_year, end_year + 1))
+
+
+def build_yearly_description_counts(
+    records: list[Record], active: list[Record]
+) -> tuple[list[str], list[int], dict[str, Counter[int]]]:
+    """Count yearly presence separately for every sheet-description."""
+    components = chart_sheet_order(records)
+    counts = {component: Counter() for component in components}
+    for record in active:
+        counts[record.sheet_name].update(get_year_values(record))
+    observed_years = {
+        year for counter in counts.values() for year in counter
+    }
+    years = (
+        list(range(min(observed_years), max(observed_years) + 1))
+        if observed_years else []
+    )
+    return components, years, counts
+
+
 def create_service_tables(records: list[Record], categories: list[Category]):
     record_fields = [
         "record_uid", "source_archive", "source_fond", "source_inventory", "source_id",
@@ -1379,6 +1413,24 @@ def create_service_tables(records: list[Record], categories: list[Category]):
         ),
     )
 
+    year_components, years, year_counts = build_yearly_description_counts(
+        records, active
+    )
+    write_csv(
+        WORK_DIR / "cases_by_year.csv",
+        ["year", *year_components],
+        (
+            {
+                "year": year,
+                **{
+                    component: year_counts[component][year]
+                    for component in year_components
+                },
+            }
+            for year in years
+        ),
+    )
+
     theme_decades: dict[str, Counter[int]] = defaultdict(Counter)
     for record in active:
         decade = get_decade(record)
@@ -1413,6 +1465,9 @@ def create_service_tables(records: list[Record], categories: list[Category]):
         "category_counts": category_counts,
         "context_counts": context_counts,
         "decade_counts": decade_counts,
+        "year_components": year_components,
+        "years": years,
+        "year_counts": year_counts,
         "theme_decades": theme_decades,
         "description_rows": description_rows,
     }
@@ -1635,6 +1690,7 @@ def write_analysis_report(
             "- tables/context_category_counts.csv — кількість контекстних "
             "згадок за категоріями;",
             "- tables/cases_by_decade.csv — хронологічний розподіл;",
+            "- tables/cases_by_year.csv — річний розподіл окремо за описами;",
             "- tables/themes_by_decade.csv — динаміка тем за десятиліттями;",
             "- thematic_exports/ — похідні XLSX/CSV-вибірки за всіма "
             "увімкненими категоріями, а також некласифіковані та службові записи.",
@@ -1912,6 +1968,32 @@ def create_figures(plt, records, categories, table_data) -> bool:
     ax.grid(axis="y", alpha=0.25)
     ax.set_axisbelow(True)
     save_figure(plt, "cases_by_decade")
+
+    year_components = table_data["year_components"]
+    years = table_data["years"]
+    year_counts = table_data["year_counts"]
+    if year_components and years:
+        figure, axes = plt.subplots(
+            len(year_components), 1,
+            figsize=(11, max(4.8, 2.7 * len(year_components))),
+            sharex=True,
+            squeeze=False,
+        )
+        for index, component in enumerate(year_components):
+            axis = axes[index][0]
+            axis.plot(
+                years,
+                [year_counts[component][year] for year in years],
+                color=colors[component],
+                linewidth=1.8,
+            )
+            axis.set_title(component_labels[component], loc="left", fontsize=10)
+            axis.set_ylabel("Справ")
+            axis.grid(alpha=0.22)
+            axis.set_axisbelow(True)
+        axes[-1][0].set_xlabel("Рік")
+        figure.suptitle("Хронологічний розподіл справ", fontsize=13)
+        save_figure(plt, "cases_by_year")
 
     ordered = category_counts.most_common()
     category_ids = [item[0] for item in ordered][::-1]
