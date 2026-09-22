@@ -306,11 +306,33 @@ class AnalysisTests(unittest.TestCase):
         r = f.Record(2,'Опис 1','1','1','Заголовок','','','','case',1850)
         self.assertEqual(f.chronology_basis(r),'section_heading')
         self.assertEqual(f.get_decade(r),1850)
+        self.assertEqual(f.get_year_values(r),[1850])
         r.start_year=1865;r.end_year=1858
         self.assertEqual(f.chronology_basis(r),'invalid_dates')
         self.assertIsNone(f.get_decade(r))
+        self.assertEqual(f.get_year_values(r),[])
         r.start_year=1850;r.end_year=1855
         self.assertEqual(f.chronology_basis(r),'dates_field')
+        self.assertEqual(f.get_year_values(r),list(range(1850,1856)))
+
+    def test_yearly_chronology_is_separate_for_each_description(self):
+        records = [
+            f.Record(2, 'Опис 1', '1', '1', 'Справа 1', '1850–1852', '', '',
+                     'case', None, start_year=1850, end_year=1852),
+            f.Record(2, 'Опис 2', '2', '2', 'Справа 2', '1851', '', '',
+                     'case', None, start_year=1851, end_year=1851),
+            f.Record(2, 'ЦДІАК', '3', '3', 'Дело 3', '', '', '',
+                     'case', 1852),
+        ]
+        components, years, counts = f.build_yearly_description_counts(
+            records, records
+        )
+
+        self.assertEqual(components, ['Опис 1', 'Опис 2', 'ЦДІАК'])
+        self.assertEqual(years, [1850, 1851, 1852])
+        self.assertEqual([counts['Опис 1'][year] for year in years], [1, 1, 1])
+        self.assertEqual([counts['Опис 2'][year] for year in years], [0, 1, 0])
+        self.assertEqual([counts['ЦДІАК'][year] for year in years], [0, 0, 1])
 
 
 if __name__ == '__main__':
