@@ -118,7 +118,7 @@ class AnalysisTests(unittest.TestCase):
     def test_dictionary_completeness(self):
         self.assertEqual({c.id for c in f.LANGUAGE_CATEGORIES['uk']},
                          {c.id for c in f.LANGUAGE_CATEGORIES['ru']})
-        self.assertEqual(len(f.LANGUAGE_CATEGORIES['ru']),11)
+        self.assertEqual(len(f.LANGUAGE_CATEGORIES['ru']),12)
         for language, categories in f.LANGUAGE_CATEGORIES.items():
             for c in categories:
                 self.assertGreaterEqual(c.minimum_score, 1)

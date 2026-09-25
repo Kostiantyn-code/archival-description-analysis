@@ -1,0 +1,27 @@
+id: personal_files
+macroblock: documentary
+minimum_score: 3
+strong_phrases:
+- особова справа
+- особиста справа
+- особова картка
+- персональна картка
+- формулярний список
+- послужний список
+- списки учнів
+- список учнів
+- списки студентів
+- список студентів
+- списки працівників
+- список працівників
+- списки службовців
+- список службовців
+- список особового складу
+- списки особового складу
+strong_terms: []
+context_only_phrases: []
+context_only_terms: []
+contextual_terms: []
+context_rules: []
+exclude_phrases: []
+review_terms: []

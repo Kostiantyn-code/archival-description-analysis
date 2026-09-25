@@ -1,0 +1,27 @@
+id: personal_files
+macroblock: documentary
+minimum_score: 3
+strong_phrases:
+- личное дело
+- личные дела
+- личная карточка
+- персональная карточка
+- формулярный список
+- послужной список
+- списки учеников
+- список учеников
+- списки студентов
+- список студентов
+- списки работников
+- список работников
+- списки служащих
+- список служащих
+- список личного состава
+- списки личного состава
+strong_terms: []
+context_only_phrases: []
+context_only_terms: []
+contextual_terms: []
+context_rules: []
+exclude_phrases: []
+review_terms: []

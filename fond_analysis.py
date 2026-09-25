@@ -64,6 +64,13 @@ LANGUAGE_CATEGORIES: dict[str, list] = {}
 LANGUAGE_AMBIGUITIES: dict[str, list] = {}
 MIN_ALLOWED_YEAR = 1790
 MAX_ALLOWED_YEAR = 1911
+PERSONAL_SECTION_RE = re.compile(
+    r"^(?:особов[іи]\s+справ[и]|особист[іи]\s+справ[и]|личн(?:ые|ое)\s+дел[ао]"
+    r"|(?:список|списки)\s+(?:учнів|учениць|студентів|службовців|працівників|особового\s+складу)"
+    r"|(?:список|списки)\s+(?:учеников|учениц|студентов|служащих|работников|личного\s+состава))\b",
+    re.I,
+)
+LETTER_HEADING_RE = re.compile(r'^[«"“]?\s*[А-ЯЁІЇЄҐA-Z]\s*[»"”]?$', re.I)
 
 
 def load_dependencies():
@@ -282,7 +289,11 @@ def detect_status(
     # пробілами: «В И Б У Л А», «В И Б У Л И», «В И Б У Л О».
     if WITHDRAWN_RE.match(title_normalized):
         return "withdrawn"
-    if re.match(r"^(?:архівний опис|архивная опись|недействующая опись|недіючий опис)(?:\s|$|[.,])", title_normalized):
+    if re.match(
+        r"^(?:(?:архівний опис|архивная опись|недействующая опись|недіючий опис)(?:\s|$|[.,])"
+        r"|(?:опис|опись)\s*[№#]\s*\d+\s+(?:фонду|фонда)\b)",
+        title_normalized,
+    ):
         return "inventory"
     if case_id and title:
         return "case"
@@ -463,6 +474,7 @@ def read_records(
 
         config = SOURCE_CONFIG.get(sheet_name, {})
         current_section_label = ""
+        current_thematic_section = ""
         for column, expected in enumerate(expected_headers, start=1):
             if column in config.get("skip_header_checks", []):
                 continue
@@ -499,6 +511,10 @@ def read_records(
             elif status == "group_heading":
                 current_section_label = title_raw
                 current_section_year = None
+                if PERSONAL_SECTION_RE.match(title_raw):
+                    current_thematic_section = title_raw
+                elif not LETTER_HEADING_RE.fullmatch(title_raw):
+                    current_thematic_section = ""
 
             record = Record(
                 excel_row=excel_row,
@@ -512,6 +528,7 @@ def read_records(
                 status=status,
                 section_year=current_section_year,
                 section_label=current_section_label,
+                thematic_section=current_thematic_section,
                 source_archive=config.get("archive", ""),
                 source_fond=str(config.get("fond", "")),
                 source_inventory=str(config.get("inventory", "")),
@@ -732,6 +749,7 @@ def classify_records(
 
     started_at = time.perf_counter()
     update_every = max(1, total // 100)
+    section_results: dict[tuple[str, str], tuple] = {}
     print_classification_progress(0, total, started_at)
 
     for processed, record in enumerate(active_records, start=1):
@@ -749,6 +767,35 @@ def classify_records(
             record.title_raw, categories, ambiguities, macroblock_order,
             language=record.language
         )
+        if record.thematic_section:
+            section_key = (record.language, record.thematic_section)
+            if section_key not in section_results:
+                section_results[section_key] = classify_title(
+                    record.thematic_section, categories, ambiguities,
+                    macroblock_order, language=record.language,
+                )
+            section_ids, section_labels, _, section_scores, _, _, _, _, _ = section_results[section_key]
+            for category_id, label in zip(section_ids, section_labels):
+                if category_id not in record.categories:
+                    record.categories.append(category_id)
+                    record.category_labels.append(label)
+                    record.scores[category_id] = section_scores[category_id]
+                    record.evidence[category_id] = [f"розділ опису: {record.thematic_section}"]
+            ordered = sorted(
+                zip(record.categories, record.category_labels),
+                key=lambda pair: (-record.scores[pair[0]], pair[1]),
+            )
+            record.categories = [pair[0] for pair in ordered]
+            record.category_labels = [pair[1] for pair in ordered]
+            category_by_id = {
+                category.id: category
+                for category in LANGUAGE_CATEGORIES.get(record.language, categories)
+            }
+            found_blocks = {
+                category_by_id[category_id].macroblock
+                for category_id in record.categories
+            }
+            record.macroblocks = [block for block in macroblock_order if block in found_blocks]
         if record.detected_language not in {"undetermined", record.language}:
             record.review_flags.append("language_check: " + record.detected_language)
         if processed % update_every == 0 or processed == total:
@@ -837,7 +884,7 @@ CLASSIFICATION_INDEX_FIELDS = [
     "pages_original", "notes_original", "language", "detected_language",
     "categories", "category_labels", "classification_type",
     "classification_confidence", "scores", "evidence", "context_categories",
-    "context_labels", "context_evidence", "section_label", "start_year",
+    "context_labels", "context_evidence", "section_label", "thematic_section", "start_year",
     "end_year", "chronology_basis",
 ]
 
@@ -870,6 +917,7 @@ def classification_index_row(record: Record) -> dict[str, Any]:
         "context_labels": " | ".join(record.context_category_labels),
         "context_evidence": base["context_evidence"],
         "section_label": record.section_label,
+        "thematic_section": record.thematic_section,
         "start_year": record.start_year or "",
         "end_year": record.end_year or "",
         "chronology_basis": chronology_basis(record),
@@ -907,7 +955,7 @@ def write_combined_indexes(
     service_fields = [
         "record_uid", "source", "archive", "fond", "inventory", "sheet",
         "row_number", "case_id", "title_original", "dates_original",
-        "pages_original", "notes_original", "status", "section_label",
+        "pages_original", "notes_original", "status", "section_label", "thematic_section",
     ]
     write_csv(
         tables_dir / "service_records.csv",
@@ -928,6 +976,7 @@ def write_combined_indexes(
                 "notes_original": r.notes_raw,
                 "status": r.status,
                 "section_label": r.section_label,
+                "thematic_section": r.thematic_section,
             }
             for r in service_records
         ),
@@ -1192,6 +1241,7 @@ def record_to_row(record: Record) -> dict[str, Any]:
         "language_source": record.language_source,
         "title_normalized": normalize_text(record.title_raw),
         "section_label": record.section_label,
+        "thematic_section": record.thematic_section,
         "chronology_basis": chronology_basis(record),
         "sheet_name": record.sheet_name,
         "excel_row": record.excel_row,
@@ -1275,7 +1325,7 @@ def create_service_tables(records: list[Record], categories: list[Category]):
     record_fields = [
         "record_uid", "source_archive", "source_fond", "source_inventory", "source_id",
         "language", "detected_language", "language_source", "title_normalized",
-        "section_label", "chronology_basis",
+        "section_label", "thematic_section", "chronology_basis",
         "sheet_name", "excel_row", "case_id_raw", "case_id_normalized", "status",
         "section_year", "start_year", "end_year", "pages",
         "title_raw", "dates_raw", "pages_raw", "notes_raw",

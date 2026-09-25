@@ -56,6 +56,7 @@ class Record:
     detected_language: str = "undetermined"
     language_source: str = "sheet_setting"
     section_label: str = ""
+    thematic_section: str = ""
     start_year: int | None = None
     end_year: int | None = None
     pages: int | None = None
