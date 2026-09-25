@@ -58,7 +58,7 @@ FIGURES_DIR = RUN_DIR / "figures"
 WORK_DIR = RUN_DIR / "tables"
 THEMATIC_DIR = RUN_DIR / "thematic_exports"
 
-SHEET_NAMES = ("Опис 1", "Опис 2", "Опис 3", "Опис 4", "ЦДІАК")
+SHEET_NAMES: tuple[str, ...] = ()
 SOURCE_CONFIG: dict[str, dict[str, Any]] = {}
 HEADER_ROWS_BY_SHEET: dict[str, int] = {}
 ANALYSIS_CONFIG: dict[str, Any] = {}
@@ -134,23 +134,6 @@ def configure_analysis(yaml_module) -> None:
     MAX_ALLOWED_YEAR = int(chronology.get("maximum_year", 2099))
     if MIN_ALLOWED_YEAR > MAX_ALLOWED_YEAR:
         raise ValueError("config/analysis.yaml: minimum_year більший за maximum_year")
-
-
-def configure_sources(yaml_module) -> None:
-    global SOURCE_CONFIG, SHEET_NAMES, HEADER_ROWS_BY_SHEET
-    HEADER_ROWS_BY_SHEET = {}
-
-    source_path = config_path("sources.yaml", BASE_DIR / "sources.yaml")
-    config = safe_load_yaml(source_path, yaml_module)
-    SOURCE_CONFIG = config.get("sheets", {})
-    if not SOURCE_CONFIG:
-        raise ValueError("sources.yaml: немає налаштованих аркушів")
-    for name, item in SOURCE_CONFIG.items():
-        if item.get("language") not in {"uk", "ru"}:
-            raise ValueError(f"Непідтримувана мова: {name}")
-        if not re.fullmatch(r"[a-z0-9_-]+", item.get("source_id", "")):
-            raise ValueError(f"Небезпечний або порожній source_id: {name}")
-    SHEET_NAMES = tuple(SOURCE_CONFIG)
 
 
 def input_workbooks() -> list[Path]:
@@ -531,13 +514,10 @@ def read_records(
         read_only=True,
         data_only=True,
     )
-    available_sheets = [name for name in SHEET_NAMES if name in workbook.sheetnames]
-    if not available_sheets:
-        available = ", ".join(workbook.sheetnames)
-        raise KeyError(
-            "У книзі немає жодного з очікуваних аркушів "
-            f"{', '.join(SHEET_NAMES)}. Доступні аркуші: {available}"
-        )
+    available_sheets = list(SHEET_NAMES)
+    if set(available_sheets) != set(workbook.sheetnames):
+        workbook.close()
+        raise ValueError("Аркуші книги змінилися після читання метаданих; запустіть аналіз знову.")
 
     issues: list[Issue] = []
     records: list[Record] = []
@@ -545,22 +525,9 @@ def read_records(
         "№", "заголовок", "крайні дати", "кількість аркушів", "примітки"
     ]
     headers_by_sheet: dict[str, list[str]] = {}
-    for ignored in set(workbook.sheetnames) - set(SHEET_NAMES):
-        issues.append(Issue("WARNING", None, "", "Аркуш", ignored,
-                            "Аркуш не налаштований у sources.yaml і не включений до аналізу.", ignored))
-
-    for missing_sheet in (name for name in SHEET_NAMES if name not in workbook.sheetnames):
-        issues.append(
-            Issue(
-                "WARNING", None, "", "Аркуш", missing_sheet,
-                "Очікуваний аркуш відсутній у книзі.",
-                missing_sheet,
-            )
-        )
-
     for sheet_name in available_sheets:
         worksheet = workbook[sheet_name]
-        header_row = HEADER_ROWS_BY_SHEET.get(sheet_name, 1)
+        header_row = HEADER_ROWS_BY_SHEET[sheet_name]
         current_section_year: int | None = None
         actual_headers = [
             normalize_text(clean_cell(cell.value))
@@ -633,7 +600,7 @@ def read_records(
                 source_id=config.get("source_id", sheet_name),
                 language=config.get("language", "uk"),
                 detected_language=detect_title_language(title_raw),
-                language_source=("sheet_inferred" if sheet_name in HEADER_ROWS_BY_SHEET else "sheet_setting"),
+                language_source="sheet_inferred",
             )
 
             if status == "case":
@@ -1156,7 +1123,7 @@ def create_filtered_workbook(
         by_sheet[record.sheet_name].append(record)
 
     for sheet_name in SHEET_NAMES:
-        header_row = HEADER_ROWS_BY_SHEET.get(sheet_name, 1)
+        header_row = HEADER_ROWS_BY_SHEET[sheet_name]
         target_sheet = workbook.create_sheet(sheet_name)
         source_sheet = (
             source_workbook[sheet_name]
