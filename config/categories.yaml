@@ -1,4 +1,4 @@
-dictionary_version: 0.7-draft
+dictionary_version: 0.8-draft
 classification:
   minimum_score: 3
 macroblocks:
@@ -8,6 +8,8 @@ macroblocks:
     label: Соціально-економічне життя
   cultural:
     label: Культурне життя
+  documentary:
+    label: Тип документації
 categories:
 - id: politics
   label: Політика і політичний нагляд
@@ -57,6 +59,14 @@ categories:
   dictionaries:
     uk: dictionaries/socioeconomic/population_and_society.yaml
     ru: dictionaries/ru/socioeconomic/population_and_society.yaml
+- id: personal_files
+  label: Особові справи та персональний облік
+  macroblock: documentary
+  enabled: true
+  export: особові_справи.xlsx
+  dictionaries:
+    uk: dictionaries/documentary/personal_files.yaml
+    ru: dictionaries/ru/documentary/personal_files.yaml
 - id: healthcare
   label: Охорона здоров’я і санітарія
   macroblock: socioeconomic
