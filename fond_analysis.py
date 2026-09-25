@@ -46,9 +46,10 @@ from text_matching import (
 )
 
 BASE_DIR = Path(__file__).resolve().parent
-SCRIPT_VERSION = "0.9"
+SCRIPT_VERSION = "0.10"
 CONFIG_DIR = BASE_DIR / "config"
-INPUT_FILE = BASE_DIR / "input.xlsx"
+INPUT_DIR = BASE_DIR / "input"
+INPUT_FILE = INPUT_DIR / "input.xlsx"
 DICTIONARIES_DIR = BASE_DIR / "dictionaries"
 OUTPUTS_DIR = BASE_DIR / "outputs"
 RUN_DIR = OUTPUTS_DIR
@@ -59,11 +60,12 @@ THEMATIC_DIR = RUN_DIR / "thematic_exports"
 
 SHEET_NAMES = ("Опис 1", "Опис 2", "Опис 3", "Опис 4", "ЦДІАК")
 SOURCE_CONFIG: dict[str, dict[str, Any]] = {}
+HEADER_ROWS_BY_SHEET: dict[str, int] = {}
 ANALYSIS_CONFIG: dict[str, Any] = {}
 LANGUAGE_CATEGORIES: dict[str, list] = {}
 LANGUAGE_AMBIGUITIES: dict[str, list] = {}
-MIN_ALLOWED_YEAR = 1790
-MAX_ALLOWED_YEAR = 1911
+MIN_ALLOWED_YEAR = 1500
+MAX_ALLOWED_YEAR = 2099
 PERSONAL_SECTION_RE = re.compile(
     r"^(?:особов[іи]\s+справ[и]|особист[іи]\s+справ[и]|личн(?:ые|ое)\s+дел[ао]"
     r"|(?:список|списки)\s+(?:учнів|учениць|студентів|службовців|працівників|особового\s+складу)"
@@ -113,28 +115,31 @@ def config_path(name: str, legacy: Path | None = None) -> Path:
 
 
 def configure_analysis(yaml_module) -> None:
-    global ANALYSIS_CONFIG, INPUT_FILE, OUTPUTS_DIR
+    global ANALYSIS_CONFIG, INPUT_DIR, INPUT_FILE, OUTPUTS_DIR
     global MIN_ALLOWED_YEAR, MAX_ALLOWED_YEAR
     path = config_path("analysis.yaml")
     config = safe_load_yaml(path, yaml_module)
     ANALYSIS_CONFIG = config
 
-    input_name = str(config.get("input_file", "input.xlsx"))
+    input_name = str(config.get("input_dir", "input"))
     output_name = str(config.get("output_root", "outputs"))
     input_path = Path(input_name)
     output_path = Path(output_name)
-    INPUT_FILE = input_path if input_path.is_absolute() else BASE_DIR / input_path
+    INPUT_DIR = input_path if input_path.is_absolute() else BASE_DIR / input_path
+    INPUT_FILE = INPUT_DIR / "input.xlsx"
     OUTPUTS_DIR = output_path if output_path.is_absolute() else BASE_DIR / output_path
 
     chronology = config.get("chronology", {})
-    MIN_ALLOWED_YEAR = int(chronology.get("minimum_year", 1790))
-    MAX_ALLOWED_YEAR = int(chronology.get("maximum_year", 1911))
+    MIN_ALLOWED_YEAR = int(chronology.get("minimum_year", 1500))
+    MAX_ALLOWED_YEAR = int(chronology.get("maximum_year", 2099))
     if MIN_ALLOWED_YEAR > MAX_ALLOWED_YEAR:
         raise ValueError("config/analysis.yaml: minimum_year більший за maximum_year")
 
 
 def configure_sources(yaml_module) -> None:
-    global SOURCE_CONFIG, SHEET_NAMES
+    global SOURCE_CONFIG, SHEET_NAMES, HEADER_ROWS_BY_SHEET
+    HEADER_ROWS_BY_SHEET = {}
+
     source_path = config_path("sources.yaml", BASE_DIR / "sources.yaml")
     config = safe_load_yaml(source_path, yaml_module)
     SOURCE_CONFIG = config.get("sheets", {})
@@ -146,6 +151,98 @@ def configure_sources(yaml_module) -> None:
         if not re.fullmatch(r"[a-z0-9_-]+", item.get("source_id", "")):
             raise ValueError(f"Небезпечний або порожній source_id: {name}")
     SHEET_NAMES = tuple(SOURCE_CONFIG)
+
+
+def input_workbooks() -> list[Path]:
+    """List real XLSX workbooks in stable order; ignore Excel lock files."""
+    if not INPUT_DIR.is_dir():
+        raise FileNotFoundError(f"Не знайдено папку {INPUT_DIR}. Створіть input/ і додайте файли XLSX.")
+    paths = sorted(
+        (p for p in INPUT_DIR.iterdir()
+         if p.is_file() and p.suffix.casefold() == ".xlsx"
+         and not p.name.startswith("~$")),
+        key=lambda p: (p.name.casefold(), p.name),
+    )
+    if not paths:
+        raise FileNotFoundError(f"У папці {INPUT_DIR} немає файлів XLSX.")
+    return paths
+
+
+def workbook_folder(path: Path, occupied: set[str]) -> str:
+    """Readable, collision-safe folder name for a workbook's own reports."""
+    stem = re.sub(r"[^\w-]+", "_", path.stem, flags=re.UNICODE).strip("_-")[:75]
+    stem = stem or "book"
+    candidate = stem
+    suffix = 2
+    while candidate.casefold() in occupied:
+        candidate = f"{stem}_{suffix}"
+        suffix += 1
+    occupied.add(candidate.casefold())
+    return candidate
+
+
+def configure_workbook_sources(openpyxl_module) -> None:
+    """Read the authoritative Archive/Fond/Inventory rows on every sheet."""
+    global SOURCE_CONFIG, SHEET_NAMES, HEADER_ROWS_BY_SHEET
+    workbook = openpyxl_module.load_workbook(INPUT_FILE, read_only=True, data_only=True)
+    try:
+        sources = {}
+        metadata_rows = {}
+        source_keys = {}
+        inventory_keys = set()
+        for sheet in workbook:
+            rows = list(sheet.iter_rows(min_row=1, max_row=4, max_col=5, values_only=True))
+            if len(rows) < 4:
+                raise ValueError(f"{INPUT_FILE.name}, {sheet.title}: потрібні три рядки метаданих і шапка у рядку 4")
+            fields = []
+            for row_number, label in enumerate(("Архів", "Фонд", "Опис"), start=1):
+                if normalize_text(clean_cell(rows[row_number - 1][0])) != normalize_text(label):
+                    raise ValueError(f"{INPUT_FILE.name}, {sheet.title}, A{row_number}: очікується «{label}»")
+                value = clean_cell(rows[row_number - 1][1])
+                if not value:
+                    raise ValueError(f"{INPUT_FILE.name}, {sheet.title}, B{row_number}: заповніть значення «{label}»")
+                fields.append(value)
+            archive, fond, inventory = fields
+            inventory_key = (archive.casefold(), fond.casefold(), inventory.casefold())
+            if inventory_key in inventory_keys:
+                raise ValueError(f"{INPUT_FILE.name}, {sheet.title}: цей архів, фонд і опис вже є на іншому аркуші")
+            inventory_keys.add(inventory_key)
+            if "№" not in clean_cell(rows[3][0]):
+                raise ValueError(f"{INPUT_FILE.name}, {sheet.title}, A4: очікується заголовок «№»")
+            key = (archive.casefold(), fond.casefold())
+            if key not in source_keys:
+                safe_fond = re.sub(r"[^a-z0-9_-]+", "_", fond.casefold()).strip("_")
+                safe_fond = safe_fond[:30] or "unnumbered"
+                source_keys[key] = f"fond_{safe_fond}_{hashlib.sha1(archive.casefold().encode('utf-8')).hexdigest()[:6]}"
+            language_counts = Counter()
+            for row in sheet.iter_rows(min_row=5, max_row=104, min_col=2, max_col=2, values_only=True):
+                title_language = detect_title_language(clean_cell(row[0]))
+                if title_language in {"uk", "ru"}:
+                    language_counts[title_language] += 2
+                elif title_language == "undetermined":
+                    tokens = tokenize(clean_cell(row[0]))
+                    if any(token in {"дело", "переписка", "сведения", "об"} for token in tokens):
+                        language_counts["ru"] += 1
+                    elif any(token in {"справа", "відомості", "щодо"} for token in tokens):
+                        language_counts["uk"] += 1
+            language = "ru" if language_counts["ru"] > language_counts["uk"] else "uk"
+            header = [normalize_text(clean_cell(value)) for value in rows[3]]
+            sources[sheet.title] = {
+                "source_id": source_keys[key], "archive": archive, "fond": fond,
+                "inventory": inventory, "language": language,
+                "pages_expected": bool(header[3]),
+                "skip_header_checks": [index for index, value in enumerate(header, 1)
+                                       if (index == 5 and not value) or
+                                       (index == 2 and re.search(r"\bф\.\s*\d", value))],
+            }
+            metadata_rows[sheet.title] = 4
+        if not sources:
+            raise ValueError(f"{INPUT_FILE.name}: книга не містить аркушів")
+        SOURCE_CONFIG = sources
+        SHEET_NAMES = tuple(sources)
+        HEADER_ROWS_BY_SHEET = metadata_rows
+    finally:
+        workbook.close()
 
 
 def safe_load_yaml(path: Path, yaml_module) -> dict[str, Any]:
@@ -426,7 +523,7 @@ def read_records(
 ) -> tuple[list[Record], list[Issue], dict[str, list[str]]]:
     if not INPUT_FILE.exists():
         raise FileNotFoundError(
-            f"Не знайдено {INPUT_FILE}. Покладіть input.xlsx поруч зі скриптом."
+            f"Не знайдено {INPUT_FILE}. Покладіть книгу XLSX у папку input/."
         )
 
     workbook = openpyxl_module.load_workbook(
@@ -463,11 +560,12 @@ def read_records(
 
     for sheet_name in available_sheets:
         worksheet = workbook[sheet_name]
+        header_row = HEADER_ROWS_BY_SHEET.get(sheet_name, 1)
         current_section_year: int | None = None
         actual_headers = [
             normalize_text(clean_cell(cell.value))
             for cell in next(
-                worksheet.iter_rows(min_row=1, max_row=1, max_col=5)
+                worksheet.iter_rows(min_row=header_row, max_row=header_row, max_col=5)
             )
         ]
         headers_by_sheet[sheet_name] = actual_headers
@@ -481,7 +579,7 @@ def read_records(
             if expected not in actual_headers[column - 1]:
                 issues.append(
                     Issue(
-                        "WARNING", 1, "", f"Колонка {column}",
+                        "WARNING", header_row, "", f"Колонка {column}",
                         actual_headers[column - 1],
                         f"Заголовок колонки не містить очікуваний текст «{expected}».",
                         sheet_name,
@@ -489,8 +587,8 @@ def read_records(
                 )
 
         for excel_row, values in enumerate(
-            worksheet.iter_rows(min_row=2, max_col=5, values_only=True),
-            start=2,
+            worksheet.iter_rows(min_row=header_row + 1, max_col=5, values_only=True),
+            start=header_row + 1,
         ):
             case_id_raw, title_raw, dates_raw, pages_raw, notes_raw = [
                 clean_cell(value) for value in values
@@ -535,6 +633,7 @@ def read_records(
                 source_id=config.get("source_id", sheet_name),
                 language=config.get("language", "uk"),
                 detected_language=detect_title_language(title_raw),
+                language_source=("sheet_inferred" if sheet_name in HEADER_ROWS_BY_SHEET else "sheet_setting"),
             )
 
             if status == "case":
@@ -1057,13 +1156,15 @@ def create_filtered_workbook(
         by_sheet[record.sheet_name].append(record)
 
     for sheet_name in SHEET_NAMES:
+        header_row = HEADER_ROWS_BY_SHEET.get(sheet_name, 1)
         target_sheet = workbook.create_sheet(sheet_name)
         source_sheet = (
             source_workbook[sheet_name]
             if sheet_name in source_workbook.sheetnames else None
         )
         if source_sheet is not None:
-            copy_source_row(source_sheet, target_sheet, 1, 1, max_columns)
+            for row_number in range(1, header_row + 1):
+                copy_source_row(source_sheet, target_sheet, row_number, row_number, max_columns)
             for column in range(1, max_columns + 1):
                 letter = openpyxl_module.utils.get_column_letter(column)
                 source_dimension = source_sheet.column_dimensions[letter]
@@ -1095,7 +1196,7 @@ def create_filtered_workbook(
             for column, value in enumerate(fallback_headers[:max_columns], start=1):
                 target_sheet.cell(1, column, value)
 
-        target_row = 2
+        target_row = header_row + 1
         for record in sorted(by_sheet.get(sheet_name, []), key=lambda r: r.excel_row):
             if source_sheet is not None:
                 copy_source_row(
@@ -1112,9 +1213,9 @@ def create_filtered_workbook(
             target_row += 1
 
         if (source_sheet is not None and source_sheet.auto_filter.ref
-                and target_row > 2):
+                and target_row > header_row + 1):
             last_column = openpyxl_module.utils.get_column_letter(max_columns)
-            target_sheet.auto_filter.ref = f"A1:{last_column}{target_row - 1}"
+            target_sheet.auto_filter.ref = f"A{header_row}:{last_column}{target_row - 1}"
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     workbook.save(output_path)
@@ -2156,41 +2257,18 @@ def print_summary(records, issues, table_data, figures_created) -> None:
         print(f"  {FIGURES_DIR}")
 
 
-def main() -> None:
+def analyze_workbook(openpyxl_module, yaml_module, plt, categories, ambiguities,
+                     macroblock_labels, dictionary_version, run_id) -> dict[str, Any]:
     global RUN_DIR, REPORTS_DIR, FIGURES_DIR, WORK_DIR, THEMATIC_DIR
-    run_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-    print(
-        f"=== АНАЛІЗ АРХІВНИХ ОПИСІВ "
-        f"— {SCRIPT_VERSION} ==="
-    )
-    print(f"Папка скрипта: {BASE_DIR}")
-    openpyxl_module, yaml_module, plt = load_dependencies()
-    configure_analysis(yaml_module)
-    configure_sources(yaml_module)
-    print(f"Вхідний файл:  {INPUT_FILE}")
-    print(f"Аркуші:        {', '.join(SHEET_NAMES)}")
-    RUN_DIR = OUTPUTS_DIR / run_id
+    configure_workbook_sources(openpyxl_module)
+    print(f"Вхідний файл: {INPUT_FILE.name}; аркуші: {', '.join(SHEET_NAMES)}")
     REPORTS_DIR = RUN_DIR / "reports"
     FIGURES_DIR = RUN_DIR / "figures"
     WORK_DIR = RUN_DIR / "tables"
     THEMATIC_DIR = RUN_DIR / "thematic_exports"
     ensure_directories()
 
-    print("\n1. Завантаження класифікаційних словників...")
-    (
-        categories, ambiguities, macroblock_labels,
-        dictionary_version,
-    ) = load_dictionaries(yaml_module)
-    LANGUAGE_CATEGORIES.clear()
-    LANGUAGE_AMBIGUITIES.clear()
-    LANGUAGE_CATEGORIES["uk"] = categories
-    LANGUAGE_AMBIGUITIES["uk"] = ambiguities
-    ru_categories, ru_ambiguities, _, _ = load_dictionaries(yaml_module, "ru")
-    LANGUAGE_CATEGORIES["ru"] = ru_categories
-    LANGUAGE_AMBIGUITIES["ru"] = ru_ambiguities
-    print(f"   Завантажено категорій: {len(categories)}")
-
-    print("2. Читання та перевірка input.xlsx...")
+    print("2. Читання та перевірка книги...")
     records, issues, _headers = read_records(openpyxl_module)
     for source in sorted({r.source_id for r in records}):
         subset = [r for r in records if r.source_id == source and r.status == "case"]
@@ -2249,11 +2327,13 @@ def main() -> None:
         "openpyxl": openpyxl_module.__version__,
         "pyyaml": yaml_module.__version__,
         "configured_sheets": list(SHEET_NAMES),
+        "sources": SOURCE_CONFIG,
+        "header_rows": HEADER_ROWS_BY_SHEET,
         "enabled_categories": [category.id for category in categories],
         "source_summary": summary_rows,
         "thematic_exports": export_manifest,
         "sha256": {
-            str(path.relative_to(BASE_DIR)): hashlib.sha256(
+            str(path.relative_to(BASE_DIR) if path.is_relative_to(BASE_DIR) else path): hashlib.sha256(
                 path.read_bytes()
             ).hexdigest()
             for path in tracked
@@ -2264,7 +2344,57 @@ def main() -> None:
     )
     print_summary(records, issues, table_data, figures_created)
     print(f"Ідентифікатор запуску: {run_id}. Старі результати збережено.")
-    print(f"Повна папка запуску:    {RUN_DIR}")
+    print(f"Повна папка книги:     {RUN_DIR}")
+    return {"file": INPUT_FILE.name, "folder": RUN_DIR.name,
+            "status": "complete", "sheets": len(SHEET_NAMES),
+            "cases": next(row["titles"] for row in summary_rows if row["source"] == "combined"),
+            "message": ""}
+
+
+def main() -> None:
+    global INPUT_FILE, RUN_DIR
+    run_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    print(f"=== АНАЛІЗ АРХІВНИХ ОПИСІВ — {SCRIPT_VERSION} ===")
+    print(f"Папка скрипта: {BASE_DIR}")
+    openpyxl_module, yaml_module, plt = load_dependencies()
+    configure_analysis(yaml_module)
+    workbooks = input_workbooks()
+    print(f"Книг для аналізу: {len(workbooks)}")
+    categories, ambiguities, macroblock_labels, dictionary_version = load_dictionaries(yaml_module)
+    LANGUAGE_CATEGORIES.clear()
+    LANGUAGE_AMBIGUITIES.clear()
+    LANGUAGE_CATEGORIES["uk"] = categories
+    LANGUAGE_AMBIGUITIES["uk"] = ambiguities
+    ru_categories, ru_ambiguities, _, _ = load_dictionaries(yaml_module, "ru")
+    LANGUAGE_CATEGORIES["ru"] = ru_categories
+    LANGUAGE_AMBIGUITIES["ru"] = ru_ambiguities
+    batch_dir = OUTPUTS_DIR / run_id
+    batch_dir.mkdir(parents=True, exist_ok=True)
+    summary = []
+    occupied = set()
+    for index, path in enumerate(workbooks, 1):
+        INPUT_FILE = path
+        RUN_DIR = batch_dir / workbook_folder(path, occupied)
+        print(f"\n[{index}/{len(workbooks)}] {path.name}", flush=True)
+        try:
+            summary.append(analyze_workbook(
+                openpyxl_module, yaml_module, plt, categories, ambiguities,
+                macroblock_labels, dictionary_version, run_id,
+            ))
+        except Exception as error:
+            RUN_DIR.mkdir(parents=True, exist_ok=True)
+            (RUN_DIR / "failure.txt").write_text(
+                f"{type(error).__name__}: {error}\n\n{traceback.format_exc()}", encoding="utf-8"
+            )
+            summary.append({"file": path.name, "folder": RUN_DIR.name,
+                            "status": "failed", "sheets": "", "cases": "",
+                            "message": str(error)})
+            print(f"Книгу пропущено через помилку: {error}", flush=True)
+    write_csv(batch_dir / "run_summary.csv",
+              ["file", "folder", "status", "sheets", "cases", "message"], summary)
+    print(f"\nПідсумок запуску: {batch_dir / 'run_summary.csv'}")
+    if any(row["status"] == "failed" for row in summary):
+        raise RuntimeError("Частина книг не опрацьована; дивіться run_summary.csv і failure.txt")
 
 
 if __name__ == "__main__":
