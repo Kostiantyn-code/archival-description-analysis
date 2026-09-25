@@ -1,4 +1,7 @@
-# Походження input.xlsx
+# Походження історичної копії input.xlsx
+
+Цей документ стосується попереднього знімка даних станом на 08.09.2026.
+Актуальні вимоги до книг для пакетного аналізу: [input/README.md](../input/README.md).
 
 Джерело: https://docs.google.com/spreadsheets/d/1OQe4jC0jSpupBNG1E7GnfzTS1O5TBaKgc7FDw--DKCk/edit
 

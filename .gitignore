@@ -220,6 +220,7 @@ __marimo__/
 # Archival description analysis: local corpus and generated artifacts
 .idea/
 input.xlsx
+input/*.xlsx
 outputs/
 work/
 reports/

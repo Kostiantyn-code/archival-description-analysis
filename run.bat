@@ -2,9 +2,11 @@
 setlocal
 cd /d "%~dp0"
 
-if not exist "input.xlsx" (
-    echo Input file not found: input.xlsx
-    echo Copy input.xlsx to this folder and run the script again.
+if not exist "input\" mkdir "input"
+dir /b /a-d "input\*.xlsx" >nul 2>&1
+if errorlevel 1 (
+    echo No XLSX workbooks found in input.
+    echo Copy one or more XLSX files into the input folder and run again.
     pause
     exit /b 1
 )

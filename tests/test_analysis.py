@@ -16,7 +16,29 @@ class AnalysisTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         f.configure_analysis(yaml)
-        f.configure_sources(yaml)
+        previous = f.INPUT_FILE
+        with tempfile.TemporaryDirectory() as temp:
+            book = Workbook()
+            book.remove(book.active)
+            for name, archive, fond, inventory, title in [
+                ('Опис 1', 'ДАМО', 230, 1, 'Справа про лікарню'),
+                ('Опис 2', 'ДАМО', 230, 2, 'Справа про лікарню'),
+                ('Опис 3', 'ДАМО', 230, 3, 'Справа про лікарню'),
+                ('Опис 4', 'ДАМО', 230, 4, 'Справа про лікарню'),
+                ('ЦДІАК', 'ЦДІАК України', 356, 1, 'Дело о больнице'),
+            ]:
+                sheet = book.create_sheet(name)
+                sheet.append(['Архів', archive])
+                sheet.append(['Фонд', fond])
+                sheet.append(['Опис', inventory])
+                sheet.append(['№', 'Заголовок', 'Крайні дати', 'Кількість аркушів', 'Примітки'])
+                sheet.append([1, title, '1850', 2])
+            f.INPUT_FILE = Path(temp) / 'fixture.xlsx'
+            book.save(f.INPUT_FILE)
+            try:
+                f.configure_workbook_sources(__import__('openpyxl'))
+            finally:
+                f.INPUT_FILE = previous
         cls.uk, cls.amb, cls.mac, _ = f.load_dictionaries(yaml)
         ru, amb, *_ = f.load_dictionaries(yaml, 'ru')
         f.LANGUAGE_CATEGORIES.update(uk=cls.uk, ru=ru)
@@ -153,20 +175,24 @@ class AnalysisTests(unittest.TestCase):
                 workbook.remove(workbook.active)
                 for name in f.SHEET_NAMES:
                     sheet = workbook.create_sheet(name)
+                    metadata = f.SOURCE_CONFIG[name]
+                    sheet.append(['Архів', metadata['archive']])
+                    sheet.append(['Фонд', metadata['fond']])
+                    sheet.append(['Опис', metadata['inventory']])
                     sheet.append(['№ з/п', 'Заголовок справи', 'Крайні дати', 'Аркуші', 'Примітки'])
                 source_sheet = workbook['Опис 1']
-                header = source_sheet['A1']
+                header = source_sheet['A4']
                 header.font = Font(name='Arial', size=11, bold=True)
                 header.fill = PatternFill('solid', fgColor='E5EDF4')
                 header.alignment = Alignment(wrap_text=True)
                 header.border = Border(bottom=Side(style='thin', color='808080'))
-                source_sheet.row_dimensions[1].height = 26.4
+                source_sheet.row_dimensions[4].height = 26.4
                 source_sheet.column_dimensions['A'].width = 12.5
                 source_sheet.sheet_view.zoomScale = 90
-                source_sheet.freeze_panes = 'B2'
+                source_sheet.freeze_panes = 'B5'
                 source_sheet.append(['1', 'Про лікарню', '1850', '2', ''])
                 source_sheet.append(['2', 'Про театр', '1851', '3', ''])
-                source_sheet['B2'].font = Font(name='Arial', italic=True)
+                source_sheet['B5'].font = Font(name='Arial', italic=True)
                 input_path = directory / 'input.xlsx'
                 workbook.save(input_path)
 
@@ -177,7 +203,7 @@ class AnalysisTests(unittest.TestCase):
                                 'xlsx': True, 'csv': False}
                 }
                 record = f.Record(
-                    2, 'Опис 1', '1', '1', 'Про лікарню', '1850', '2', '',
+                    5, 'Опис 1', '1', '1', 'Про лікарню', '1850', '2', '',
                     'case', 1850, categories=['healthcare'],
                     category_labels=['Охорона здоров’я і санітарія'],
                     scores={'healthcare': 4},
@@ -194,25 +220,25 @@ class AnalysisTests(unittest.TestCase):
                 )
                 self.assertEqual(result.sheetnames, list(f.SHEET_NAMES))
                 self.assertEqual(
-                    sum(max(0, sum(1 for _ in ws.iter_rows()) - 1)
+                    sum(max(0, sum(1 for _ in ws.iter_rows()) - 4)
                         for ws in result.worksheets),
                     1,
                 )
                 exported = result['Опис 1']
-                self.assertEqual(exported.max_row, 2)
-                self.assertEqual(exported['A2'].value, '1')
-                self.assertEqual(exported['B2'].value, 'Про лікарню')
-                self.assertTrue(exported['A1'].font.bold)
-                self.assertEqual(exported['A1'].font.name, 'Arial')
-                self.assertEqual(exported['A1'].fill.fill_type, 'solid')
-                self.assertEqual(exported['A1'].fill.fgColor.rgb, '00E5EDF4')
-                self.assertTrue(exported['A1'].alignment.wrap_text)
-                self.assertEqual(exported['A1'].border.bottom.style, 'thin')
-                self.assertAlmostEqual(exported.row_dimensions[1].height, 26.4)
+                self.assertEqual(exported.max_row, 5)
+                self.assertEqual(exported['A5'].value, '1')
+                self.assertEqual(exported['B5'].value, 'Про лікарню')
+                self.assertTrue(exported['A4'].font.bold)
+                self.assertEqual(exported['A4'].font.name, 'Arial')
+                self.assertEqual(exported['A4'].fill.fill_type, 'solid')
+                self.assertEqual(exported['A4'].fill.fgColor.rgb, '00E5EDF4')
+                self.assertTrue(exported['A4'].alignment.wrap_text)
+                self.assertEqual(exported['A4'].border.bottom.style, 'thin')
+                self.assertAlmostEqual(exported.row_dimensions[4].height, 26.4)
                 self.assertAlmostEqual(exported.column_dimensions['A'].width, 12.5)
                 self.assertEqual(exported.sheet_view.zoomScale, 90)
-                self.assertEqual(exported.freeze_panes, 'B2')
-                self.assertTrue(exported['B2'].font.italic)
+                self.assertEqual(exported.freeze_panes, 'B5')
+                self.assertTrue(exported['B5'].font.italic)
                 result.close()
         finally:
             f.INPUT_FILE = old_input
@@ -256,7 +282,7 @@ class AnalysisTests(unittest.TestCase):
         finally:
             f.CONFIG_DIR = old_config_dir
 
-    def test_source_config(self):
+    def test_metadata_from_fixture(self):
         self.assertEqual(f.SOURCE_CONFIG['ЦДІАК']['language'],'ru')
         self.assertEqual(f.SOURCE_CONFIG['ЦДІАК']['fond'],'356')
         self.assertEqual(f.SOURCE_CONFIG['Опис 1']['fond'],'230')

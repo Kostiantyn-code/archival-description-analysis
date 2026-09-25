@@ -17,7 +17,6 @@ class PersonnelClassificationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         f.configure_analysis(yaml)
-        f.configure_sources(yaml)
         cls.uk, cls.amb_uk, cls.blocks, _ = f.load_dictionaries(yaml)
         cls.ru, cls.amb_ru, _, _ = f.load_dictionaries(yaml, "ru")
         f.LANGUAGE_CATEGORIES.update(uk=cls.uk, ru=cls.ru)
@@ -56,6 +55,9 @@ class PersonnelClassificationTests(unittest.TestCase):
             book = Workbook()
             sheet = book.active
             sheet.title = "Опис 1"
+            sheet.append(["Архів", "ДАМО"])
+            sheet.append(["Фонд", 229])
+            sheet.append(["Опис", 1])
             sheet.append(["№", "Заголовок", "Крайні дати", "Кількість аркушів", "Примітки"])
             sheet.append([None, "Особові справи ув’язнених"])
             sheet.append([None, "«А»"])
@@ -70,11 +72,15 @@ class PersonnelClassificationTests(unittest.TestCase):
             path = Path(temporary) / "input.xlsx"
             book.save(path)
             original_input = f.INPUT_FILE
+            original_sources = f.SOURCE_CONFIG, f.SHEET_NAMES, f.HEADER_ROWS_BY_SHEET
             f.INPUT_FILE = path
             try:
-                records, _, _ = f.read_records(__import__("openpyxl"))
+                module = __import__("openpyxl")
+                f.configure_workbook_sources(module)
+                records, _, _ = f.read_records(module)
             finally:
                 f.INPUT_FILE = original_input
+                f.SOURCE_CONFIG, f.SHEET_NAMES, f.HEADER_ROWS_BY_SHEET = original_sources
             f.classify_records(records, self.uk, self.amb_uk, list(self.blocks))
             cases = [record for record in records if record.status == "case"]
             self.assertEqual([r.thematic_section for r in cases], [
