@@ -10,6 +10,7 @@ import statistics
 import sys
 import time
 import traceback
+from io import BytesIO
 from collections import Counter, defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -17,6 +18,7 @@ from typing import Any, Iterable
 
 
 from models import Issue, Category, Record, CATEGORY_RULE_FIELDS
+from document_types import DOCUMENT_TYPES, DOCUMENT_TYPE_RULES_VERSION, match_document_types
 from text_matching import (
     MATCH_LANGUAGE,
     WORD_RE,
@@ -46,7 +48,7 @@ from text_matching import (
 )
 
 BASE_DIR = Path(__file__).resolve().parent
-SCRIPT_VERSION = "0.10"
+SCRIPT_VERSION = "0.11-dev"
 CONFIG_DIR = BASE_DIR / "config"
 INPUT_DIR = BASE_DIR / "input"
 INPUT_FILE = INPUT_DIR / "input.xlsx"
@@ -1573,6 +1575,74 @@ def create_service_tables(records: list[Record], categories: list[Category]):
         ["category_id", "category_label", "decade", "cases"],
         theme_rows,
     )
+
+    document_type_counts: Counter[str] = Counter()
+    document_type_by_sheet: dict[str, Counter[str]] = {
+        sheet_name: Counter() for sheet_name in ordered_sheets
+    }
+    document_type_index: list[dict[str, Any]] = []
+    document_type_multi = 0
+    for record in active:
+        matches = match_document_types(normalize_text(record.title_raw))
+        ids = [document_type.id for document_type, _ in matches]
+        document_type_counts.update(ids)
+        document_type_by_sheet[record.sheet_name].update(ids)
+        document_type_multi += len(ids) > 1
+        document_type_index.append({
+            "record_uid": f"{record.source_id}:{record.sheet_name}:{record.excel_row}",
+            "archive": record.source_archive,
+            "fond": record.source_fond,
+            "inventory": record.source_inventory,
+            "sheet_name": record.sheet_name,
+            "excel_row": record.excel_row,
+            "case_id": record.case_id_raw,
+            "title": record.title_raw,
+            "document_type_ids": " | ".join(ids),
+            "document_type_labels": " | ".join(
+                document_type.label for document_type, _ in matches
+            ),
+            "matched_expressions": " | ".join(
+                f"{document_type.id}: {expression}"
+                for document_type, expression in matches
+            ),
+        })
+
+    write_csv(
+        WORK_DIR / "document_type_index.csv",
+        ["record_uid", "archive", "fond", "inventory", "sheet_name",
+         "excel_row", "case_id", "title", "document_type_ids",
+         "document_type_labels", "matched_expressions"],
+        document_type_index,
+    )
+    write_csv(
+        WORK_DIR / "document_type_counts.csv",
+        ["document_type_id", "document_type_label", "titles",
+         "percent_of_analyzed_titles"],
+        ({"document_type_id": document_type.id,
+          "document_type_label": document_type.label,
+          "titles": document_type_counts[document_type.id],
+          "percent_of_analyzed_titles": (
+              f"{document_type_counts[document_type.id] / len(active) * 100:.2f}"
+              if active else "0.00"
+          )} for document_type in DOCUMENT_TYPES),
+    )
+    sheet_totals = Counter(record.sheet_name for record in active)
+    write_csv(
+        WORK_DIR / "document_types_by_description.csv",
+        ["sheet_name", "description", "document_type_id", "document_type_label",
+         "titles", "description_titles_total", "percent_of_description_titles"],
+        ({"sheet_name": sheet_name,
+          "description": configured_description_label(sheet_name),
+          "document_type_id": document_type.id,
+          "document_type_label": document_type.label,
+          "titles": document_type_by_sheet[sheet_name][document_type.id],
+          "description_titles_total": sheet_totals[sheet_name],
+          "percent_of_description_titles": (
+              f"{document_type_by_sheet[sheet_name][document_type.id] / sheet_totals[sheet_name] * 100:.2f}"
+              if sheet_totals[sheet_name] else "0.00"
+          )}
+         for sheet_name in ordered_sheets for document_type in DOCUMENT_TYPES),
+    )
     return {
         "active": active,
         "topic_unclassified": topic_unclassified,
@@ -1588,6 +1658,11 @@ def create_service_tables(records: list[Record], categories: list[Category]):
         "year_counts": year_counts,
         "theme_decades": theme_decades,
         "description_rows": description_rows,
+        "document_type_counts": document_type_counts,
+        "document_type_by_sheet": document_type_by_sheet,
+        "document_type_matched": sum(bool(row["document_type_ids"])
+                                     for row in document_type_index),
+        "document_type_multi": document_type_multi,
     }
 
 
@@ -1788,6 +1863,35 @@ def write_analysis_report(
             f"{format_int(count)} | {percent(count, len(active))} |"
         )
 
+    document_type_counts = table_data["document_type_counts"]
+    lines.extend([
+        "",
+        "## Згадки типів документів у заголовках",
+        "",
+        f"Версія словника форм документів: `{DOCUMENT_TYPE_RULES_VERSION}`. "
+        "Класифікація багатозначна: в одному заголовку може бути названо "
+        "кілька форм документів. Результат позначає лише згадку в заголовку, "
+        "а не підтверджує склад самої справи. Формули «справа про» та «дело о» "
+        "не вважаються видами документів.",
+        "",
+        f"- Принаймні одну згадку знайдено: "
+        f"{format_int(table_data['document_type_matched'])} "
+        f"({percent(table_data['document_type_matched'], len(active))}).",
+        f"- Кілька типів у заголовку: "
+        f"{format_int(table_data['document_type_multi'])} "
+        f"({percent(table_data['document_type_multi'], len(active))}).",
+        "",
+        "| Тип документа | Заголовків | Частка заголовків |",
+        "|---|---:|---:|",
+    ])
+    document_type_labels = {document_type.id: document_type.label
+                            for document_type in DOCUMENT_TYPES}
+    for document_type_id, count in document_type_counts.most_common():
+        lines.append(
+            f"| {document_type_labels[document_type_id]} | "
+            f"{format_int(count)} | {percent(count, len(active))} |"
+        )
+
     lines.extend(
         [
             "",
@@ -1810,6 +1914,9 @@ def write_analysis_report(
             "- tables/cases_by_decade.csv — хронологічний розподіл;",
             "- tables/cases_by_year.csv — річний розподіл окремо за описами;",
             "- tables/themes_by_decade.csv — динаміка тем за десятиліттями;",
+            "- tables/document_type_index.csv — згадки типів документів у кожному заголовку й вирази, що спричинили збіг;",
+            "- tables/document_type_counts.csv — підсумок згадок за типами;",
+            "- tables/document_types_by_description.csv — типи документів за архівними описами;",
             "- thematic_exports/ — похідні XLSX/CSV-вибірки за всіма "
             "увімкненими категоріями, а також некласифіковані та службові записи.",
         ]
@@ -1850,7 +1957,12 @@ def write_analysis_report(
 
 def save_figure(plt, name: str) -> None:
     plt.tight_layout()
-    plt.savefig(FIGURES_DIR / f"{name}.png", dpi=220, bbox_inches="tight")
+    buffer = BytesIO()
+    plt.savefig(buffer, format="png", dpi=220, bbox_inches="tight")
+    png = buffer.getvalue()
+    if not png.endswith(b"\x00\x00\x00\x00IEND\xaeB`\x82"):
+        raise RuntimeError(f"{name}.png: зображення збережено неповністю")
+    (FIGURES_DIR / f"{name}.png").write_bytes(png)
     plt.savefig(FIGURES_DIR / f"{name}.svg", bbox_inches="tight")
     plt.close()
 
@@ -2134,6 +2246,49 @@ def create_figures(plt, records, categories, table_data) -> bool:
     ax.set_axisbelow(True)
     save_figure(plt, "thematic_categories")
 
+    document_type_counts = table_data["document_type_counts"]
+    if document_type_counts:
+        document_type_ids = [key for key, _ in document_type_counts.most_common()][::-1]
+        document_type_by_id = {item.id: item for item in DOCUMENT_TYPES}
+        document_type_labels = [document_type_by_id[key].label
+                                for key in document_type_ids]
+        document_type_values = {
+            component: [table_data["document_type_by_sheet"][component][key]
+                        for key in document_type_ids]
+            for component in components
+        }
+        figure, (axis, details) = plt.subplots(
+            1, 2, sharey=True,
+            figsize=(16, max(7.0, len(document_type_ids) * 0.48 + 1.8)),
+            gridspec_kw={"width_ratios": [3.8, 1.8]},
+        )
+        draw_stacked_bars(
+            axis, document_type_labels, components,
+            document_type_values, colors, component_labels,
+            horizontal=True,
+        )
+        axis.set_title("Згадки типів документів у заголовках справ")
+        axis.set_xlabel("Кількість заголовків")
+        axis.grid(axis="x", alpha=0.25)
+        axis.set_axisbelow(True)
+        axis.set_xlim(right=max(document_type_counts.values()) * 1.22)
+
+        details.axis("off")
+        details.set_xlim(0, len(components))
+        details.set_title("За архівними описами", fontsize=10)
+        for column, component in enumerate(components):
+            source = SOURCE_CONFIG.get(component, {})
+            header = (f"{source.get('archive', component)}\n"
+                      f"ф. {source.get('fond', '')}, оп. {source.get('inventory', '')}")
+            details.text(column + 0.5, len(document_type_ids) - 0.13,
+                         header, ha="center", va="bottom", fontsize=7,
+                         clip_on=False)
+            for row, document_type_id in enumerate(document_type_ids):
+                count = table_data["document_type_by_sheet"][component][document_type_id]
+                details.text(column + 0.5, row, str(count) if count else "—",
+                             ha="center", va="center", fontsize=8)
+        save_figure(plt, "document_types")
+
     coverage_keys = ["subject", "context_only", "unclassified"]
     coverage_labels = [
         "Предметну тему\nвизначено", "Лише контекст", "Не визначено"
@@ -2280,7 +2435,8 @@ def analyze_workbook(openpyxl_module, yaml_module, plt, categories, ambiguities,
     )
 
     tracked = (
-        [INPUT_FILE, Path(__file__), BASE_DIR / "models.py", BASE_DIR / "text_matching.py"]
+        [INPUT_FILE, Path(__file__), BASE_DIR / "models.py", BASE_DIR / "text_matching.py",
+         BASE_DIR / "document_types.py"]
         + sorted(CONFIG_DIR.glob("*.yaml"))
         + sorted(DICTIONARIES_DIR.rglob("*.yaml"))
     )
@@ -2288,6 +2444,7 @@ def analyze_workbook(openpyxl_module, yaml_module, plt, categories, ambiguities,
         "status": "complete",
         "script_version": SCRIPT_VERSION,
         "dictionary_version": dictionary_version,
+        "document_type_rules_version": DOCUMENT_TYPE_RULES_VERSION,
         "run_id": run_id,
         "completed_at": datetime.now().isoformat(timespec="seconds"),
         "python": platform.python_version(),
