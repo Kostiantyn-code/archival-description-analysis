@@ -22,6 +22,7 @@ from document_types import DOCUMENT_TYPES, DOCUMENT_TYPE_RULES_VERSION, match_do
 from geography import BASEMAP as GEOGRAPHY_BASEMAP, GAZETTEER as GEOGRAPHY_GAZETTEER, find_places, load_places, unknown_candidates
 from geography_maps import TEMPLATE as GEOGRAPHY_TEMPLATE, write_maps as write_geography_maps
 from terminology import RULES_VERSION as TERMINOLOGY_RULES_VERSION, TEMPLATE as TERMINOLOGY_TEMPLATE, write_terminology_report
+from theme_links import write_theme_links
 from text_matching import (
     MATCH_LANGUAGE,
     WORD_RE,
@@ -1983,6 +1984,19 @@ def write_analysis_report(
         "Інтерактивний звіт: `figures/terminology_evolution.html`.",
     ])
 
+    theme_links = table_data["theme_links"]
+    lines.extend([
+        "", "## Зв’язки між темами справ / Мережа співкласифікації справ", "",
+        f"{format_int(theme_links['multi'])} із {format_int(theme_links['titles'])} "
+        "заголовків справ мають щонайменше дві предметні теми. "
+        f"Виявлено {format_int(theme_links['category_pairs'])} пар тем. "
+        "Спільна справа може утворювати кілька пар. Для аналізу окремих "
+        "описів відкрийте `figures/theme_links.html`; повні підрахунки містить "
+        "`tables/theme_links_by_description.csv`, а перелік справ для "
+        "кожної пари — `tables/theme_link_cases.csv`. Контекстні згадки "
+        "не утворюють тематичних зв’язків.",
+    ])
+
     lines.extend(
         [
             "",
@@ -2016,6 +2030,9 @@ def write_analysis_report(
             "- tables/term_mentions.csv — заголовки, шифри справ та точні форми термінів;",
             "- tables/terms_by_decade_and_description.csv — частоти на 1 000 заголовків за десятиліттями й описами;",
             "- figures/terminology_evolution.html — інтерактивний звіт про лексику заголовків;",
+            "- tables/theme_links_by_description.csv — зв’язки тем і блоків за описами;",
+            "- tables/theme_link_cases.csv — справи, які утворюють кожну пару тем або блоків;",
+            "- figures/theme_links.html — інтерактивна мережа співкласифікації справ;",
             "- thematic_exports/ — похідні XLSX/CSV-вибірки за всіма "
             "увімкненими категоріями, а також некласифіковані та службові записи.",
         ]
@@ -2521,6 +2538,12 @@ def analyze_workbook(openpyxl_module, yaml_module, plt, categories, ambiguities,
             {s: configured_description_label(s) for s in sheets_for_map},
             chart_sheet_colors(sheets_for_map), get_decade,
             WORK_DIR, FIGURES_DIR,
+            "Спільний зріз" if scope == "combined" else scope,
+        )
+        table_data["theme_links"] = write_theme_links(
+            table_data["active"], sheets_for_map,
+            {s: configured_description_label(s) for s in sheets_for_map},
+            categories, macroblock_labels, WORK_DIR, FIGURES_DIR,
             "Спільний зріз" if scope == "combined" else scope,
         )
         write_error_log(scoped_issues, subset)
