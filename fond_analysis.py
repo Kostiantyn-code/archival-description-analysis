@@ -19,6 +19,8 @@ from typing import Any, Iterable
 
 from models import Issue, Category, Record, CATEGORY_RULE_FIELDS
 from document_types import DOCUMENT_TYPES, DOCUMENT_TYPE_RULES_VERSION, match_document_types
+from geography import BASEMAP as GEOGRAPHY_BASEMAP, GAZETTEER as GEOGRAPHY_GAZETTEER, find_places, load_places, unknown_candidates
+from geography_maps import TEMPLATE as GEOGRAPHY_TEMPLATE, write_maps as write_geography_maps
 from text_matching import (
     MATCH_LANGUAGE,
     WORD_RE,
@@ -48,7 +50,7 @@ from text_matching import (
 )
 
 BASE_DIR = Path(__file__).resolve().parent
-SCRIPT_VERSION = "0.11-dev"
+SCRIPT_VERSION = "0.12-dev"
 CONFIG_DIR = BASE_DIR / "config"
 INPUT_DIR = BASE_DIR / "input"
 INPUT_FILE = INPUT_DIR / "input.xlsx"
@@ -1391,6 +1393,58 @@ def build_yearly_description_counts(
     return components, years, counts
 
 
+def create_geography_tables(active: list[Record], ordered_sheets: list[str]) -> dict[str, Any]:
+    _, places = load_places()
+    rows = []
+    missing = []
+    totals: Counter[str] = Counter()
+    by_description: Counter[tuple[str, str]] = Counter()
+    by_decade: Counter[tuple[str, str, str]] = Counter()
+    for record in active:
+        found = find_places(record.title_raw, places)
+        decade = get_decade(record)
+        for place, expression in found:
+            row = {
+                "record_uid": f"{record.source_id}:{record.sheet_name}:{record.excel_row}",
+                "archive": record.source_archive, "fond": record.source_fond,
+                "inventory": record.source_inventory, "sheet_name": record.sheet_name,
+                "case_id": record.case_id_normalized, "decade": decade if decade is not None else "unknown",
+                "place": place.name, "latitude": place.lat, "longitude": place.lon,
+                "matched_form": expression, "title": record.title_raw,
+            }
+            rows.append(row)
+            totals[place.name] += 1
+            by_description[place.name, record.sheet_name] += 1
+            by_decade[place.name, str(row["decade"]), record.sheet_name] += 1
+        for candidate in unknown_candidates(record.title_raw, found):
+            missing.append({
+                "record_uid": f"{record.source_id}:{record.sheet_name}:{record.excel_row}",
+                "sheet_name": record.sheet_name, "case_id": record.case_id_normalized,
+                "candidate": candidate, "title": record.title_raw,
+            })
+    write_csv(WORK_DIR / "geography_mentions.csv",
+              ["record_uid", "archive", "fond", "inventory", "sheet_name",
+               "case_id", "decade", "place", "latitude", "longitude",
+               "matched_form", "title"], rows)
+    write_csv(WORK_DIR / "geography_by_description.csv",
+              ["place", "sheet_name", "description", "titles"],
+              ({"place": place.name, "sheet_name": sheet,
+                "description": configured_description_label(sheet),
+                "titles": by_description[place.name, sheet]}
+               for place in places for sheet in ordered_sheets))
+    write_csv(WORK_DIR / "geography_by_decade.csv",
+              ["place", "decade", "sheet_name", "description", "titles"],
+              ({"place": place, "decade": decade, "sheet_name": sheet,
+                "description": configured_description_label(sheet), "titles": count}
+               for (place, decade, sheet), count in sorted(by_decade.items(),
+                   key=lambda item: (item[0][0], item[0][1], item[0][2]))))
+    write_csv(WORK_DIR / "geography_unmapped_candidates.csv",
+              ["record_uid", "sheet_name", "case_id", "candidate", "title"], missing)
+    return {"rows": rows, "totals": totals,
+            "matched_cases": len({row["record_uid"] for row in rows}),
+            "unmapped_candidates": len(missing)}
+
+
 def create_service_tables(records: list[Record], categories: list[Category]):
     record_fields = [
         "record_uid", "source_archive", "source_fond", "source_inventory", "source_id",
@@ -1643,6 +1697,7 @@ def create_service_tables(records: list[Record], categories: list[Category]):
           )}
          for sheet_name in ordered_sheets for document_type in DOCUMENT_TYPES),
     )
+    geography = create_geography_tables(active, ordered_sheets)
     return {
         "active": active,
         "topic_unclassified": topic_unclassified,
@@ -1663,6 +1718,7 @@ def create_service_tables(records: list[Record], categories: list[Category]):
         "document_type_matched": sum(bool(row["document_type_ids"])
                                      for row in document_type_index),
         "document_type_multi": document_type_multi,
+        "geography": geography,
     }
 
 
@@ -1892,6 +1948,26 @@ def write_analysis_report(
             f"{format_int(count)} | {percent(count, len(active))} |"
         )
 
+    geography = table_data["geography"]
+    lines.extend([
+        "", "## Географічні згадки в заголовках", "",
+        f"Версія географічного словника: `{load_places()[0]}`. Знайдено "
+        f"{format_int(len(geography['rows']))} пар «справа — населений пункт» "
+        f"у {format_int(geography['matched_cases'])} заголовках "
+        f"({percent(geography['matched_cases'], len(active))}). "
+        "Одна справа може згадувати кілька місць. Координати позначають "
+        "приблизний сучасний центр міста, а не місце події. Назви установ "
+        "та адміністративні прикметники без явної назви населеного пункту "
+        "не вважаються географічним доказом.",
+        "",
+        f"Назв із явним географічним префіксом, не зіставлених зі словником: "
+        f"{format_int(geography['unmapped_candidates'])}; "
+        "перевіряйте `geography_unmapped_candidates.csv` перед доповненням словника.",
+        "", "| Населений пункт | Згадок |", "|---|---:|",
+    ])
+    for place, count in geography["totals"].most_common(20):
+        lines.append(f"| {place} | {format_int(count)} |")
+
     lines.extend(
         [
             "",
@@ -1917,6 +1993,11 @@ def write_analysis_report(
             "- tables/document_type_index.csv — згадки типів документів у кожному заголовку й вирази, що спричинили збіг;",
             "- tables/document_type_counts.csv — підсумок згадок за типами;",
             "- tables/document_types_by_description.csv — типи документів за архівними описами;",
+            "- tables/geography_mentions.csv — кожна згадка населеного пункту, координати й заголовок справи;",
+            "- tables/geography_by_description.csv — згадки за описами, включно з нульовими значеннями;",
+            "- tables/geography_by_decade.csv — згадки за десятиліттями та описами;",
+            "- tables/geography_unmapped_candidates.csv — географічні назви, які варто перевірити й додати до словника;",
+            "- figures/geography_south.html, geography_europe.html, geography_russia.html — окремі інтерактивні ракурси тієї самої карти;",
             "- thematic_exports/ — похідні XLSX/CSV-вибірки за всіма "
             "увімкненими категоріями, а також некласифіковані та службові записи.",
         ]
@@ -2418,6 +2499,13 @@ def analyze_workbook(openpyxl_module, yaml_module, plt, categories, ambiguities,
         table_data = create_service_tables(subset, categories)
         write_error_log(scoped_issues, subset)
         figures_created = create_figures(plt, subset, categories, table_data)
+        sheets_for_map = chart_sheet_order(subset)
+        write_geography_maps(
+            FIGURES_DIR, table_data["geography"]["rows"], sheets_for_map,
+            {s: configured_description_label(s) for s in sheets_for_map},
+            chart_sheet_colors(sheets_for_map),
+            "Спільний зріз" if scope == "combined" else scope,
+        )
         write_analysis_report(subset, scoped_issues, categories, macroblock_labels,
                               table_data, figures_created, dictionary_version)
         cases = table_data["active"]
@@ -2436,7 +2524,8 @@ def analyze_workbook(openpyxl_module, yaml_module, plt, categories, ambiguities,
 
     tracked = (
         [INPUT_FILE, Path(__file__), BASE_DIR / "models.py", BASE_DIR / "text_matching.py",
-         BASE_DIR / "document_types.py"]
+         BASE_DIR / "document_types.py", BASE_DIR / "geography.py",
+         BASE_DIR / "geography_maps.py", GEOGRAPHY_BASEMAP, GEOGRAPHY_TEMPLATE]
         + sorted(CONFIG_DIR.glob("*.yaml"))
         + sorted(DICTIONARIES_DIR.rglob("*.yaml"))
     )
@@ -2445,6 +2534,7 @@ def analyze_workbook(openpyxl_module, yaml_module, plt, categories, ambiguities,
         "script_version": SCRIPT_VERSION,
         "dictionary_version": dictionary_version,
         "document_type_rules_version": DOCUMENT_TYPE_RULES_VERSION,
+        "geography_rules_version": load_places()[0],
         "run_id": run_id,
         "completed_at": datetime.now().isoformat(timespec="seconds"),
         "python": platform.python_version(),
