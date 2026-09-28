@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="uk"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Еволюція термінології та ідеологем · архівні описи</title>
+<style>
+:root{font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;color:#183040;background:#f5f8fa}
+*{box-sizing:border-box}body{margin:0}main{max-width:1160px;margin:0 auto;padding:28px 24px 60px}
+h1{font-size:2rem;line-height:1.2;margin:0 0 6px}h2{font-size:1.35rem;line-height:1.25;margin:32px 0 10px}
+p{margin:8px 0 14px}.lead{font-size:1.1rem;color:#41596a;margin-bottom:20px}.muted,.note{color:#516678}.note{font-size:.9rem}
+.eyebrow{text-transform:uppercase;letter-spacing:.08em;font-size:.75rem;color:#356781;font-weight:700;margin-bottom:9px}
+.facts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:20px 0 22px}
+.fact{background:#fff;border:1px solid #d8e1e7;border-radius:10px;padding:13px 16px}
+.fact strong{display:block;font-size:1.25rem;line-height:1.25}.fact span{font-size:.86rem;color:#526475}
+.insight{background:#e9f1f5;border-left:4px solid #3d7796;padding:16px 19px;margin:21px 0;border-radius:4px;line-height:1.6}
+.toolbar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin:15px 0}.toolbar label{font-weight:650}
+select{border:1px solid #9db1bd;background:#fff;border-radius:7px;padding:9px 12px;font:inherit;max-width:100%;min-width:290px}
+.panel{background:#fff;border:1px solid #d8e1e7;border-radius:12px;padding:19px;margin:16px 0}
+.panel h3{font-size:1.07rem;margin:0 0 7px}.panel p{font-size:.88rem;color:#526475;margin:0 0 12px}
+.chart-scroll{overflow-x:auto}.chart-scroll svg{width:100%;min-width:680px;height:auto;display:block}
+.series{display:flex;flex-wrap:wrap;gap:11px 19px;font-size:.85rem;margin-top:7px;color:#31475b}
+.series .key{display:inline-flex;align-items:center;gap:6px}.swatch{display:inline-block;width:11px;height:11px;border-radius:50%}
+.facts-in-chart{display:flex;gap:24px;flex-wrap:wrap;color:#395367;margin:8px 0 2px;font-size:.9rem}
+.facts-in-chart strong{color:#15344a;font-variant-numeric:tabular-nums}
+table{border-collapse:collapse;width:100%;font-size:.88rem;font-variant-numeric:tabular-nums}
+th,td{padding:8px 9px;border-bottom:1px solid #e1e9ef;text-align:right;white-space:nowrap}
+th:first-child,td:first-child{text-align:left}th{background:#f0f5f7;color:#314a5d}
+tbody tr:hover{background:#f6f9fb}.table-scroll{overflow:auto}
+.source-card{background:#fff;border:1px solid #d8e1e7;border-radius:8px;margin:10px 0;padding:12px 15px}
+.source-card .ref{font-weight:650;color:#2a5573;font-size:.9rem}.source-card p{margin:6px 0 0;overflow-wrap:anywhere}
+code{font-size:.89em;background:#eaf0f4;padding:1px 4px;border-radius:4px}a{color:#245d8a}
+details summary{cursor:pointer;font-weight:650}.method{font-size:.92rem;line-height:1.6}
+@media(max-width:650px){main{padding:20px 13px}h1{font-size:1.5rem}.facts{grid-template-columns:1fr;gap:6px}.panel{padding:12px}select{min-width:0;width:100%}}
+</style></head><body><main>
+<div class="eyebrow">Пробний лексичний звіт · __SCOPE__</div>
+<h1>Еволюція термінології та ідеологем</h1>
+<p class="lead">Як змінюються <strong>згадки слів у заголовках справ</strong> за десятиліттями та архівними описами.</p>
+<div class="facts"><div class="fact"><strong>__TITLE_COUNT__</strong><span>заголовків справ у цьому зрізі</span></div><div class="fact"><strong>__DECADE_RANGE__</strong><span>повний діапазон датованих справ</span></div><div class="fact"><strong>__TERM_COUNT__</strong><span>відібраних термінів і формул</span></div></div>
+<div class="insight" id="insight"><strong>Як читати.</strong> Оберіть слово або точну формулу й порівняйте загальну частоту з кожним описом. Складені стовпчики показують, внеском яких описів пояснюється сукупна зміна; приклади нижче дають змогу перевірити контекст заголовків.</div>
+<h2>Динаміка конкретного терміна</h2>
+<p class="muted">Одна справа зараховується до терміна один раз, навіть якщо слово повторюється в заголовку. Стовпчики розкладають кількість справ на описи; лінії порівнюють частоту на 1 000 заголовків.</p>
+<div class="toolbar"><label for="term">Термін або формула</label><select id="term"></select></div>
+<div class="panel"><h3 id="rate-title"></h3><p>Суцільна лінія — від 100 заголовків у цьому описі за десятиліття; пунктир і порожня точка — менша вибірка. Окремі лінії побудовано для описів, у яких є щонайменше 100 датованих заголовків за одне десятиліття. Шкала кожного терміна змінюється.</p><div class="chart-scroll"><svg id="rate-chart" viewBox="0 0 980 290" role="img"></svg></div><div class="series" id="rate-legend"></div></div>
+<div class="panel"><h3>Кількість згадок за описами</h3><p>Складені стовпчики показують, звідки походить зростання сукупного показника.</p><div class="chart-scroll"><svg id="count-chart" viewBox="0 0 980 235" role="img"></svg></div><div class="series" id="count-legend"></div></div>
+<h2>Точні значення</h2>
+<div class="facts-in-chart" id="metrics"></div>
+<div class="table-scroll"><table><thead><tr id="table-head"><th>Десятиліття</th><th>Справ у масиві</th><th>Згадок</th><th>На 1 000</th></tr></thead><tbody id="numbers"></tbody></table></div>
+<p class="note">У таблиці наведено всі десятиліття; * позначає менше 100 справ за десятиліття. У колонках описів: кількість заголовків із терміном / загальна кількість заголовків. На графіках показано десятиліття із щонайменше 100 справами в цьому зрізі; якщо їх немає, показано всі датовані десятиліття.</p>
+<h2>Приклади заголовків</h2><div id="examples"></div>
+<h2>Як інтерпретувати</h2>
+<div class="method"><p><strong>Що вимірюємо.</strong> Частка заголовків із лексичною формою, а не частка документів у справах чи поширеність ідей серед населення. Для кожного терміна українські та російські форми зведено в одну мітку; збіги й конкретні заголовки наведені у супровідному CSV. Десятиліття взято з початкового року справи або заголовка розділу — як у <code>themes_by_decade</code>; недатовані й записи з некоректними датами не входять до часових графіків.</p>
+<p><strong>Чому обережно з висновками.</strong> Заголовки архівних описів — короткі описи справ, а не повний текст документів. Слова «політичний», «революційний», «неблагонадійний» тут є маркерами формулювання заголовка; вони не доводять переконань згаданих людей. Українські й російські назви описів не дають підстав тлумачити графіки як зміну мови діловодства. Зміна частоти може бути наслідком різного складу описів у різні десятиліття.</p>
+<p><strong>Межі лексикону.</strong> Це перевірка відібраних формул, а не автоматичне виявлення всіх ідеологем. «Почесний громадянин» розглядається як окремий становий титул, а «кріпосний селянин» — як словосполучення, щоб не змішувати з «кріпосним управлінням». Значення термінів слід перевіряти за справами перед історичним узагальненням. Для діахронного читання частот і обережності щодо складу корпусу див. <a href="https://academic.oup.com/dsh/article/36/Supplement_2/ii109/6421793">дослідження історичних газетних корпусів</a>.</p></div>
+</main>
+<script>
+const DATA=__DATA__;
+const desc=DATA.descriptions,colors=DATA.colors,periods=DATA.periods,termSelect=document.getElementById('term');
+for(const [group,label] of DATA.groups){const opt=document.createElement('optgroup');opt.label=label;for(const t of DATA.terms.filter(t=>t.group===group)){const o=document.createElement('option');o.value=t.id;o.textContent=t.label;opt.appendChild(o)}termSelect.appendChild(opt)}
+const commonPeriods=periods.filter(d=>(DATA.bases.all[d]||0)>=100),chartPeriods=commonPeriods.length?commonPeriods:periods;
+for(const label of DATA.labels){const th=document.createElement('th');th.textContent=label;document.getElementById('table-head').append(th)}
+function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+function nfmt(n){return Number(n).toLocaleString('uk-UA')}
+function rate(hit,base){return base?hit/base*1000:0}
+function cell(scope,d,id){return DATA.values[scope][d][id]}
+function total(scope,d){return DATA.bases[scope][d]||0}
+function svgEl(tag,attrs,txt){const e=document.createElementNS('http://www.w3.org/2000/svg',tag);for(const [k,v] of Object.entries(attrs))e.setAttribute(k,v);if(txt!==undefined)e.textContent=txt;return e}
+function renderLine(term){const svg=document.getElementById('rate-chart');svg.replaceChildren();svg.setAttribute('aria-label',`Частота згадок: ${term.label}`);
+ const series=[['all','#344d62','Весь масив'],...desc.flatMap((s,i)=>chartPeriods.some(d=>total(s,d)>=100)?[[s,colors[i],DATA.labels[i]]]:[])];
+ const relevant=series.flatMap(([s])=>chartPeriods.map(d=>total(s,d)?rate(cell(s,d,term.id),total(s,d)):0));
+ const ceiling=Math.max(2,Math.ceil(Math.max(0,...relevant)*1.12/5)*5);const x=d=>80+(chartPeriods.length<2?0.5:chartPeriods.indexOf(d)/(chartPeriods.length-1))*845,y=v=>248-v/ceiling*204;
+ for(const value of [0,ceiling/2,ceiling]){const Y=y(value);svg.append(svgEl('line',{x1:79,y1:Y,x2:932,y2:Y,stroke:'#dce5eb','stroke-width':1}));svg.append(svgEl('text',{x:72,y:Y+4,'text-anchor':'end',fill:'#4d6273','font-size':12},Math.round(value).toString()))}
+ for(const d of chartPeriods){svg.append(svgEl('text',{x:x(d),y:272,'text-anchor':'middle',fill:'#4d6273','font-size':12},`${d}-ті`))}
+ for(const [scope,color,label] of series){const pts=chartPeriods.filter(d=>total(scope,d)).map(d=>({d,x:x(d),y:y(rate(cell(scope,d,term.id),total(scope,d))),n:total(scope,d),v:cell(scope,d,term.id)}));
+ for(let i=1;i<pts.length;i++){let a=pts[i-1],b=pts[i];svg.append(svgEl('line',{x1:a.x,y1:a.y,x2:b.x,y2:b.y,stroke:color,'stroke-width':2.2,'stroke-dasharray':a.n<100||b.n<100?'5 5':'none'}))}
+ for(const p of pts){let c=svgEl('circle',{cx:p.x,cy:p.y,r:5.3,fill:p.n<100?'#fff':color,stroke:color,'stroke-width':2});c.append(svgEl('title',{},`${label} · ${p.d}-ті: ${p.v} із ${p.n} (${rate(p.v,p.n).toFixed(1)} на 1 000)`));svg.append(c)}}
+ document.getElementById('rate-legend').innerHTML=series.map(([_,color,label])=>`<span class="key"><i class="swatch" style="background:${color}"></i>${esc(label)}</span>`).join('')}
+function renderBars(term){const svg=document.getElementById('count-chart');svg.replaceChildren();svg.setAttribute('aria-label',`Кількість згадок за описами: ${term.label}`);
+ const max=Math.max(1,...chartPeriods.map(d=>cell('all',d,term.id))),step=845/Math.max(1,chartPeriods.length),scale=156/max;
+ for(const [idx,d] of chartPeriods.entries()){const base=81+idx*step,w=Math.min(82,step*.68);let bottom=188;
+ for(const [s,scope] of desc.entries()){const value=cell(scope,d,term.id),h=value*scale;if(!value)continue;let rect=svgEl('rect',{x:base+(step-w)/2,y:bottom-h,width:w,height:h,fill:colors[s]});rect.append(svgEl('title',{},`${DATA.labels[s]} · ${d}-ті: ${value}`));svg.append(rect);bottom-=h}
+ svg.append(svgEl('text',{x:base+step/2,y:209,'text-anchor':'middle',fill:'#4d6273','font-size':12},`${d}-ті`));svg.append(svgEl('text',{x:base+step/2,y:Math.max(17,bottom-7),'text-anchor':'middle',fill:'#183040','font-size':12},cell('all',d,term.id).toString()))}
+ svg.append(svgEl('line',{x1:77,y1:188,x2:948,y2:188,stroke:'#abbcc6'}));
+ document.getElementById('count-legend').innerHTML=desc.map((s,i)=>`<span class="key"><i class="swatch" style="background:${colors[i]}"></i>${esc(DATA.labels[i])}</span>`).join('')}
+function renderTable(term){const tbody=document.getElementById('numbers');tbody.replaceChildren();
+ for(const d of periods){const n=total('all',d),m=cell('all',d,term.id),tr=document.createElement('tr');
+ const values=[`${d}–${d+9}${n<100?' *':''}`,nfmt(n),nfmt(m),(rate(m,n)).toFixed(2),...desc.map(s=>`${cell(s,d,term.id)} / ${total(s,d)}`)];
+ for(const value of values){const td=document.createElement('td');td.textContent=value;tr.append(td)}tbody.append(tr)}}
+function renderExamples(term){const holder=document.getElementById('examples');holder.replaceChildren();const cases=DATA.examples[term.id]||[];
+ if(!cases.length){holder.textContent='У цьому масиві прикладів не знайдено.';return}
+ for(const row of cases){const card=document.createElement('div');card.className='source-card';const ref=document.createElement('div');ref.className='ref';ref.textContent=`${row.archive}, ф. ${row.fond}, оп. ${row.inventory}, спр. ${row.case_id} · ${Number.isInteger(row.decade)?`${row.decade}-ті`:'без датування'} · «${row.matched_form}»`;const title=document.createElement('p');title.textContent=row.title;card.append(ref,title);holder.append(card)}}
+function render(){const term=DATA.terms.find(t=>t.id===termSelect.value),overall=periods.reduce((n,d)=>n+cell('all',d,term.id),0);
+ document.getElementById('rate-title').textContent=`${term.label}: справ на 1 000 заголовків`;
+ document.getElementById('metrics').innerHTML=`<span>За весь датований період: <strong>${nfmt(overall)}</strong> заголовків</span><span>Окремі описи наведено в таблиці та на стовпчиках.</span>`;
+ renderLine(term);renderBars(term);renderTable(term);renderExamples(term)}
+termSelect.addEventListener('change',render);termSelect.value='political';render();
+</script></body></html>
