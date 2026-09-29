@@ -22,7 +22,8 @@ from document_types import DOCUMENT_TYPES, DOCUMENT_TYPE_RULES_VERSION, match_do
 from geography import BASEMAP as GEOGRAPHY_BASEMAP, GAZETTEER as GEOGRAPHY_GAZETTEER, find_places, load_places, unknown_candidates
 from geography_maps import TEMPLATE as GEOGRAPHY_TEMPLATE, write_maps as write_geography_maps
 from terminology import RULES_VERSION as TERMINOLOGY_RULES_VERSION, TEMPLATE as TERMINOLOGY_TEMPLATE, write_terminology_report
-from theme_links import write_theme_links
+from theme_links import TEMPLATE as THEME_LINKS_TEMPLATE, write_theme_links
+from html_report import write_html_report
 from text_matching import (
     MATCH_LANGUAGE,
     WORD_RE,
@@ -52,7 +53,7 @@ from text_matching import (
 )
 
 BASE_DIR = Path(__file__).resolve().parent
-SCRIPT_VERSION = "0.13-dev"
+SCRIPT_VERSION = "0.14-dev"
 CONFIG_DIR = BASE_DIR / "config"
 INPUT_DIR = BASE_DIR / "input"
 INPUT_FILE = INPUT_DIR / "input.xlsx"
@@ -2574,6 +2575,7 @@ def analyze_workbook(openpyxl_module, yaml_module, plt, categories, ambiguities,
         [INPUT_FILE, Path(__file__), BASE_DIR / "models.py", BASE_DIR / "text_matching.py",
          BASE_DIR / "document_types.py", BASE_DIR / "geography.py",
          BASE_DIR / "geography_maps.py", BASE_DIR / "terminology.py",
+         BASE_DIR / "theme_links.py", BASE_DIR / "html_report.py", THEME_LINKS_TEMPLATE,
          GEOGRAPHY_BASEMAP, GEOGRAPHY_TEMPLATE, TERMINOLOGY_TEMPLATE]
         + sorted(CONFIG_DIR.glob("*.yaml"))
         + sorted(DICTIONARIES_DIR.rglob("*.yaml"))
@@ -2606,6 +2608,14 @@ def analyze_workbook(openpyxl_module, yaml_module, plt, categories, ambiguities,
     (RUN_DIR / "run_manifest.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
     )
+    write_html_report(RUN_DIR, INPUT_FILE.name, scopes, issues,
+                      SCRIPT_VERSION, dictionary_version, macroblock_labels)
+    manifest["outputs"] = sorted(path.relative_to(RUN_DIR).as_posix()
+                                 for path in RUN_DIR.rglob("*") if path.is_file())
+    (RUN_DIR / "run_manifest.json").write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    print(f"HTML-звіт:            {RUN_DIR / 'report.html'}")
     print_summary(records, issues, table_data, figures_created)
     print(f"Ідентифікатор запуску: {run_id}. Старі результати збережено.")
     print(f"Повна папка книги:     {RUN_DIR}")

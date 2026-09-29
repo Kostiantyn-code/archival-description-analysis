@@ -72,6 +72,18 @@ class ThemeLinkTests(unittest.TestCase):
                                            page, re.S).group(1))
             self.assertEqual(payload["scopes"]["Опис Б"]["cat"]["multi"], 1)
             self.assertEqual(payload["scopes"]["__all__"]["block"]["multi"], 1)
+            self.assertEqual(ab["shared_per_1000_titles"], "666.667")
+            self.assertEqual(len(payload["meta"]["descriptions"]), 3)
+            zero = next(e for e in payload["scopes"]["Опис Б"]["cat"]["edges"]
+                        if e["a"] == "a" and e["b"] == "c")
+            self.assertEqual((zero["count"], zero["rate"], zero["lift"]), (0, 0, None))
+            empty = payload["scopes"]["Порожній опис"]["cat"]["edges"]
+            self.assertEqual(len(empty), 3)
+            self.assertTrue(all(e["count"] == 0 and e["rate"] is None and e["lift"] is None
+                                for e in empty))
+            self.assertTrue(all(r["shared_per_1000_titles"] == "" for r in rows
+                                if r["scope"] == "Порожній опис"))
+
 
 
 if __name__ == "__main__":

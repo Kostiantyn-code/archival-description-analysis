@@ -15,7 +15,7 @@ TEMPLATE = Path(__file__).resolve().parent / "maps" / "theme-links-template.html
 SUMMARY_FIELDS = (
     "scope", "description", "level", "theme_a_id", "theme_a", "theme_b_id",
     "theme_b", "titles_total", "theme_a_titles", "theme_b_titles",
-    "shared_titles", "relative_frequency",
+    "shared_titles", "relative_frequency", "shared_per_1000_titles",
 )
 CASE_FIELDS = (
     "record_uid", "sheet_name", "archive", "fond", "inventory", "case_id",
@@ -111,6 +111,7 @@ def write_theme_links(
                 shared = pair_counts[pair]
                 denominator = node_counts[a] * node_counts[b]
                 lift = shared * len(subset) / denominator if denominator else None
+                rate = shared * 1000 / len(subset) if subset else None
                 summary_rows.append({
                     "scope": sheet, "description": title, "level": level,
                     "theme_a_id": a, "theme_a": known[a],
@@ -118,13 +119,15 @@ def write_theme_links(
                     "titles_total": len(subset), "theme_a_titles": node_counts[a],
                     "theme_b_titles": node_counts[b], "shared_titles": shared,
                     "relative_frequency": f"{lift:.3f}" if lift is not None else "",
+                    "shared_per_1000_titles": f"{rate:.3f}" if rate is not None else "",
                 })
-                if shared:
-                    edges.append({
-                        "a": a, "b": b, "count": shared,
-                        "lift": round(lift, 3),
-                        "examples": _examples(pair_records[pair]),
-                    })
+                # Keep zero pairs so a selected link can be compared across descriptions.
+                edges.append({
+                    "a": a, "b": b, "count": shared,
+                    "lift": round(lift, 3) if lift is not None else None,
+                    "rate": round(rate, 3) if rate is not None else None,
+                    "examples": _examples(pair_records[pair]),
+                })
             breakdown[sheet][level] = {
                 "total": len(subset), "multi": multi,
                 "nodes": dict(node_counts), "edges": edges,
@@ -155,6 +158,7 @@ def write_theme_links(
                            for id_, label in blocks.items()},
             "catOrder": list(configured_categories),
             "catBlock": {category.id: category.macroblock for category in categories},
+            "descriptions": [[s, sheet_labels[s]] for s in sheets],
             "scopes": [["__all__", "Усі описи"], *[[s, sheet_labels[s]] for s in sheets]],
         },
         "scopes": breakdown,
@@ -166,5 +170,5 @@ def write_theme_links(
     (figures_dir / "theme_links.html").write_text(page, encoding="utf-8")
     return {
         "titles": len(active), "multi": breakdown["__all__"]["cat"]["multi"],
-        "category_pairs": len(breakdown["__all__"]["cat"]["edges"]),
+        "category_pairs": sum(edge["count"] > 0 for edge in breakdown["__all__"]["cat"]["edges"]),
     }
