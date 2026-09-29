@@ -1,13 +1,12 @@
 """Co-classification of case titles by subject categories and macroblocks."""
 from __future__ import annotations
 
-import csv
 import html
-import json
 from collections import Counter, defaultdict
 from itertools import combinations
 from pathlib import Path
 
+from report_utils import json_for_script, write_csv
 from models import Category, Record
 
 
@@ -21,13 +20,6 @@ CASE_FIELDS = (
     "record_uid", "sheet_name", "archive", "fond", "inventory", "case_id",
     "level", "theme_a_id", "theme_b_id", "title",
 )
-
-
-def _write_csv(path: Path, fields: tuple[str, ...], rows: list[dict]) -> None:
-    with path.open("w", encoding="utf-8-sig", newline="") as stream:
-        writer = csv.DictWriter(stream, fieldnames=fields, delimiter=";")
-        writer.writeheader()
-        writer.writerows(rows)
 
 
 def _example(record: Record) -> dict[str, str]:
@@ -98,7 +90,7 @@ def write_theme_links(
                     pair_records[pair].append(record)
                     if sheet != "__all__":
                         case_rows.append({
-                            "record_uid": f"{record.source_id}:{record.sheet_name}:{record.excel_row}",
+                            "record_uid": record.record_uid,
                             "sheet_name": record.sheet_name, "archive": record.source_archive,
                             "fond": record.source_fond, "inventory": record.source_inventory,
                             "case_id": record.case_id_normalized or record.case_id_raw,
@@ -133,8 +125,10 @@ def write_theme_links(
                 "nodes": dict(node_counts), "edges": edges,
             }
 
-    _write_csv(tables_dir / "theme_links_by_description.csv", SUMMARY_FIELDS, summary_rows)
-    _write_csv(tables_dir / "theme_link_cases.csv", CASE_FIELDS, case_rows)
+    write_csv(tables_dir / "theme_links_by_description.csv", SUMMARY_FIELDS, summary_rows,
+              extrasaction="raise", create_parent=False)
+    write_csv(tables_dir / "theme_link_cases.csv", CASE_FIELDS, case_rows,
+              extrasaction="raise", create_parent=False)
     abbreviations = {
         "politics": "Політика", "public_administration": "Управління",
         "law_and_police": "Право і поліція", "military_affairs": "Військова справа",
@@ -163,7 +157,7 @@ def write_theme_links(
         },
         "scopes": breakdown,
     }
-    payload = json.dumps(data, ensure_ascii=False, separators=(",", ":")).replace("<", "\\u003c")
+    payload = json_for_script(data)
     page = (TEMPLATE.read_text(encoding="utf-8")
             .replace("__DATA__", payload)
             .replace("__SCOPE__", html.escape(scope_title)))

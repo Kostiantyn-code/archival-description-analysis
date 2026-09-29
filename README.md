@@ -225,6 +225,7 @@ python -m unittest discover -s tests -v
 - [Методика тематичного експорту](docs/export_methodology.md)
 - [Особливості вхідних даних](docs/input_export_notes.md)
 - [Перевірка спрощення коду](docs/simplification.md)
+- [Усунення дублювання після 0.14-dev](docs/refactoring-0.14.md)
 - [Зміни версії 0.8](docs/revision-0.8.md)
 - [Зміни версії 0.9](docs/revision-0.9.md)
 

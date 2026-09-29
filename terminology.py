@@ -5,14 +5,13 @@ people named in the records or the contents of documents within a case.
 """
 from __future__ import annotations
 
-import csv
 import html
-import json
 import re
 from collections import Counter
 from pathlib import Path
-from typing import Callable, Iterable
+from typing import Callable
 
+from report_utils import json_for_script, write_csv
 from models import Record
 
 
@@ -60,13 +59,6 @@ def match_terms(title: str) -> list[tuple[str, str]]:
             if (hit := pattern.search(title))]
 
 
-def _write_csv(path: Path, fields: tuple[str, ...], rows: Iterable[dict]) -> None:
-    with path.open("w", encoding="utf-8-sig", newline="") as stream:
-        writer = csv.DictWriter(stream, fieldnames=fields, delimiter=";")
-        writer.writeheader()
-        writer.writerows(rows)
-
-
 def _examples(index: list[dict], term_id: str, sheets: list[str]) -> list[dict]:
     """Sample distinct cases across descriptions and periods for verification."""
     candidates = [row for row in index if row["term_id"] == term_id]
@@ -109,7 +101,7 @@ def write_terminology_report(
         for term_id, matched_form in match_terms(record.title_raw):
             term = next(item for item in TERMS if item[0] == term_id)
             index.append({
-                "record_uid": f"{record.source_id}:{record.sheet_name}:{record.excel_row}",
+                "record_uid": record.record_uid,
                 "archive": record.source_archive, "fond": record.source_fond,
                 "inventory": record.source_inventory, "sheet": record.sheet_name,
                 "case_id": record.case_id_normalized, "decade": decade if decade is not None else "unknown",
@@ -133,8 +125,10 @@ def write_terminology_report(
                     "titles_total": n, "titles_with_term": count,
                     "per_1000_titles": f"{count / n * 1000:.2f}" if n else "",
                 })
-    _write_csv(tables_dir / "term_mentions.csv", INDEX_FIELDS, index)
-    _write_csv(tables_dir / "terms_by_decade_and_description.csv", SUMMARY_FIELDS, summary)
+    write_csv(tables_dir / "term_mentions.csv", INDEX_FIELDS, index,
+              extrasaction="raise", create_parent=False)
+    write_csv(tables_dir / "terms_by_decade_and_description.csv", SUMMARY_FIELDS, summary,
+              extrasaction="raise", create_parent=False)
 
     data = {
         "terms": [{"id": t[0], "label": t[1], "group": t[2]} for t in TERMS],
@@ -146,7 +140,7 @@ def write_terminology_report(
                    for sheet in ["all", *sheets]},
         "examples": {t[0]: _examples(index, t[0], sheets) for t in TERMS},
     }
-    payload = json.dumps(data, ensure_ascii=False, separators=(",", ":")).replace("<", "\\u003c")
+    payload = json_for_script(data)
     period_label = (f"{min(periods)}–{max(periods)}-ті" if periods else "немає датованих справ")
     page = (TEMPLATE.read_text(encoding="utf-8")
             .replace("__DATA__", payload)
