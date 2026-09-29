@@ -127,6 +127,15 @@ class MultiWorkbookTests(unittest.TestCase):
                 c_manifest = json.loads((run / "C" / "run_manifest.json").read_text())
                 self.assertEqual(len(a_manifest["sources"]), 2)
                 self.assertEqual(len(c_manifest["sources"]), 1)
+                for folder, manifest in (("A", a_manifest), ("C", c_manifest)):
+                    self.assertTrue((run / folder / "report.html").is_file())
+                    self.assertIn("report.html", manifest["outputs"])
+                    self.assertIn("html_report.py", manifest["sha256"])
+                    self.assertIn("theme_links.py", manifest["sha256"])
+                    self.assertIn("maps/theme-links-template.html", manifest["sha256"])
+                self.assertFalse((run / "B" / "report.html").exists())
+                self.assertNotIn("C.xlsx", (run / "A" / "report.html").read_text())
+
                 self.assertEqual(next(row["titles"] for row in a_manifest["source_summary"]
                                       if row["source"] == "combined"), 2)
                 self.assertEqual(next(row["titles"] for row in c_manifest["source_summary"]
