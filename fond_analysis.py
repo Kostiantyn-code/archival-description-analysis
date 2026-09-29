@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import csv
 import hashlib
 import json
 import platform
@@ -19,36 +18,25 @@ from typing import Any, Iterable
 
 from models import Issue, Category, Record, CATEGORY_RULE_FIELDS
 from document_types import DOCUMENT_TYPES, DOCUMENT_TYPE_RULES_VERSION, match_document_types
-from geography import BASEMAP as GEOGRAPHY_BASEMAP, GAZETTEER as GEOGRAPHY_GAZETTEER, find_places, load_places, unknown_candidates
+from geography import BASEMAP as GEOGRAPHY_BASEMAP, find_places, load_places, unknown_candidates
 from geography_maps import TEMPLATE as GEOGRAPHY_TEMPLATE, write_maps as write_geography_maps
 from terminology import RULES_VERSION as TERMINOLOGY_RULES_VERSION, TEMPLATE as TERMINOLOGY_TEMPLATE, write_terminology_report
 from theme_links import TEMPLATE as THEME_LINKS_TEMPLATE, write_theme_links
 from html_report import write_html_report
+from report_utils import write_csv
 from text_matching import (
     MATCH_LANGUAGE,
-    WORD_RE,
     YEAR_HEADING_RE,
     YEAR_RE,
     LONG_NUMBER_RE,
     WITHDRAWN_RE,
-    STEM_ENDINGS,
     clean_cell,
     normalize_text,
     tokenize,
-    UK_IRREGULAR,
-    RU_IRREGULAR,
-    light_stem_word,
-    ukrainian_stem_word,
     stem_tokens,
-    cached_item_tokens,
-    item_tokens,
-    find_phrase_positions,
-    contains_item,
     item_matcher,
     mask_item,
     normalize_case_id,
-    RU_ENDINGS,
-    russian_stem_word,
     detect_title_language,
 )
 
@@ -917,21 +905,6 @@ def print_classification_progress(
     print("\r" + details.ljust(115), end="\n" if finished else "", flush=True)
 
 
-def write_csv(path: Path, fieldnames: list[str],
-              rows: Iterable[dict[str, Any]]) -> int:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    written = 0
-    with path.open("w", encoding="utf-8-sig", newline="") as stream:
-        writer = csv.DictWriter(
-            stream, fieldnames=fieldnames, delimiter=";", extrasaction="ignore"
-        )
-        writer.writeheader()
-        for row in rows:
-            writer.writerow(row)
-            written += 1
-    return written
-
-
 def classification_type(record: Record) -> str:
     if len(record.categories) > 1:
         return "subject_multilabel"
@@ -1004,26 +977,18 @@ def write_combined_indexes(
     unclassified = [record for record in cases if not record.categories]
     service_records = [record for record in records if record.status != "case"]
 
-    written = write_csv(
-        tables_dir / "classification_index.csv",
-        CLASSIFICATION_INDEX_FIELDS,
-        (classification_index_row(record) for record in cases),
-    )
-    if written != len(cases):
-        raise RuntimeError(
-            "classification_index.csv: записано "
-            f"{written} рядків замість {len(cases)}"
+    for filename, selected in (
+        ("classification_index.csv", cases),
+        ("unclassified_cases.csv", unclassified),
+    ):
+        written = write_csv(
+            tables_dir / filename, CLASSIFICATION_INDEX_FIELDS,
+            (classification_index_row(record) for record in selected),
         )
-    written = write_csv(
-        tables_dir / "unclassified_cases.csv",
-        CLASSIFICATION_INDEX_FIELDS,
-        (classification_index_row(record) for record in unclassified),
-    )
-    if written != len(unclassified):
-        raise RuntimeError(
-            "unclassified_cases.csv: записано "
-            f"{written} рядків замість {len(unclassified)}"
-        )
+        if written != len(selected):
+            raise RuntimeError(
+                f"{filename}: записано {written} рядків замість {len(selected)}"
+            )
 
     service_fields = [
         "record_uid", "source", "archive", "fond", "inventory", "sheet",
@@ -1035,7 +1000,7 @@ def write_combined_indexes(
         service_fields,
         (
             {
-                "record_uid": f"{r.source_id}:{r.sheet_name}:{r.excel_row}",
+                "record_uid": r.record_uid,
                 "source": r.source_id,
                 "archive": r.source_archive,
                 "fond": r.source_fond,
@@ -1306,7 +1271,7 @@ def record_to_row(record: Record) -> dict[str, Any]:
         for category_id, values in record.context_evidence.items()
     )
     return {
-        "record_uid": f"{record.source_id}:{record.sheet_name}:{record.excel_row}",
+        "record_uid": record.record_uid,
         "source_archive": record.source_archive,
         "source_fond": record.source_fond,
         "source_inventory": record.source_inventory,
@@ -1408,7 +1373,7 @@ def create_geography_tables(active: list[Record], ordered_sheets: list[str]) -> 
         decade = get_decade(record)
         for place, expression in found:
             row = {
-                "record_uid": f"{record.source_id}:{record.sheet_name}:{record.excel_row}",
+                "record_uid": record.record_uid,
                 "archive": record.source_archive, "fond": record.source_fond,
                 "inventory": record.source_inventory, "sheet_name": record.sheet_name,
                 "case_id": record.case_id_normalized, "decade": decade if decade is not None else "unknown",
@@ -1421,7 +1386,7 @@ def create_geography_tables(active: list[Record], ordered_sheets: list[str]) -> 
             by_decade[place.name, str(row["decade"]), record.sheet_name] += 1
         for candidate in unknown_candidates(record.title_raw, found):
             missing.append({
-                "record_uid": f"{record.source_id}:{record.sheet_name}:{record.excel_row}",
+                "record_uid": record.record_uid,
                 "sheet_name": record.sheet_name, "case_id": record.case_id_normalized,
                 "candidate": candidate, "title": record.title_raw,
             })
@@ -1646,7 +1611,7 @@ def create_service_tables(records: list[Record], categories: list[Category]):
         document_type_by_sheet[record.sheet_name].update(ids)
         document_type_multi += len(ids) > 1
         document_type_index.append({
-            "record_uid": f"{record.source_id}:{record.sheet_name}:{record.excel_row}",
+            "record_uid": record.record_uid,
             "archive": record.source_archive,
             "fond": record.source_fond,
             "inventory": record.source_inventory,
@@ -1815,9 +1780,6 @@ def write_analysis_report(
     def percent(value: int, total: int) -> str:
         return f"{value / total * 100:.2f}%" if total else "0.00%"
 
-    def format_int(value: int) -> str:
-        return f"{value:,}".replace(",", " ")
-
     lines = [
         "# Результати аналізу архівних описів",
         "",
@@ -1831,15 +1793,15 @@ def write_analysis_report(
         "",
         "| Показник | Значення |",
         "|---|---:|",
-        f"| Заголовки справ, включені до аналізу | {format_int(len(active))} |",
-        f"| Вибулі записи | {format_int(status_counts['withdrawn'])} |",
-        f"| Заголовки років | {format_int(status_counts['year_heading'])} |",
+        f"| Заголовки справ, включені до аналізу | {format_count(len(active))} |",
+        f"| Вибулі записи | {format_count(status_counts['withdrawn'])} |",
+        f"| Заголовки років | {format_count(status_counts['year_heading'])} |",
         f"| Загальні заголовки груп справ | "
-        f"{format_int(status_counts['group_heading'])} |",
-        f"| Записи про архівний опис | {format_int(status_counts['inventory'])} |",
-        f"| Нерозпізнані рядки | {format_int(status_counts['unknown'])} |",
-        f"| Помилки | {format_int(error_count)} |",
-        f"| Попередження | {format_int(warning_count)} |",
+        f"{format_count(status_counts['group_heading'])} |",
+        f"| Записи про архівний опис | {format_count(status_counts['inventory'])} |",
+        f"| Нерозпізнані рядки | {format_count(status_counts['unknown'])} |",
+        f"| Помилки | {format_count(error_count)} |",
+        f"| Попередження | {format_count(warning_count)} |",
         "",
         "## Розподіл за архівними описами",
         "",
@@ -1848,11 +1810,11 @@ def write_analysis_report(
     ]
     for row in table_data["description_rows"]:
         lines.append(
-            f"| {row['description']} | {format_int(row['cases_in_analysis'])} | "
-            f"{format_int(row['withdrawn_records'])} | "
-            f"{format_int(row['subject_classified'])} | "
-            f"{format_int(row['context_only'])} | "
-            f"{format_int(row['unclassified'])} |"
+            f"| {row['description']} | {format_count(row['cases_in_analysis'])} | "
+            f"{format_count(row['withdrawn_records'])} | "
+            f"{format_count(row['subject_classified'])} | "
+            f"{format_count(row['context_only'])} | "
+            f"{format_count(row['unclassified'])} |"
         )
 
     lines.extend(
@@ -1862,8 +1824,8 @@ def write_analysis_report(
         "",
         f"- Розпізнаний діапазон років: "
         f"{min(years) if years else '—'}–{max(years) if years else '—'}.",
-        f"- Справ із розпізнаною кількістю аркушів: {format_int(len(pages))}.",
-        f"- Сума аркушів лише за заповненими числовими значеннями: {format_int(sum(pages))}.",
+        f"- Справ із розпізнаною кількістю аркушів: {format_count(len(pages))}.",
+        f"- Сума аркушів лише за заповненими числовими значеннями: {format_count(sum(pages))}.",
         f"- Заголовків без заповненого поля дат: {sum(not r.dates_raw for r in active)}.",
         f"- Заголовків без розпізнаної кількості аркушів: {len(active)-len(pages)}.",
         "- Хронологія: початковий рік із поля дат; за його відсутності — рік групового заголовка. Це різні підстави, позначені в records.csv та chronology_sources.csv; рік групи не є крайньою датою справи. Зворотні діапазони та роки поза контрольними межами не включені до хронологічних графіків.",
@@ -1878,18 +1840,18 @@ def write_analysis_report(
         "",
         "## Покриття тематичною класифікацією",
         "",
-        f"- Предметну тематику визначено: {format_int(len(classified))} "
+        f"- Предметну тематику визначено: {format_count(len(classified))} "
         f"({percent(len(classified), len(active))}).",
         f"- Визначено лише контекст осіб або установ: "
-        f"{format_int(len(context_only))} "
+        f"{format_count(len(context_only))} "
         f"({percent(len(context_only), len(active))}).",
-        f"- Не визначено ні тему, ні контекст: {format_int(len(unclassified))} "
+        f"- Не визначено ні тему, ні контекст: {format_count(len(unclassified))} "
         f"({percent(len(unclassified), len(active))}).",
-        f"- Належить до кількох категорій: {format_int(len(multilabel))} "
+        f"- Належить до кількох категорій: {format_count(len(multilabel))} "
         f"({percent(len(multilabel), len(active))}).",
-        f"- Позначено для контекстної перевірки: {format_int(len(needs_review))}.",
+        f"- Позначено для контекстної перевірки: {format_count(len(needs_review))}.",
         f"- Виявлено окремі контекстні згадки осіб або установ: "
-        f"{format_int(len(context_mentions))} "
+        f"{format_count(len(context_mentions))} "
         f"({percent(len(context_mentions), len(active))}).",
         "",
         "## Тематичні категорії",
@@ -1901,7 +1863,7 @@ def write_analysis_report(
     for category_id, count in category_counts.most_common():
         lines.append(
             f"| {category_by_id[category_id].label} | "
-            f"{format_int(count)} | {percent(count, len(active))} |"
+            f"{format_count(count)} | {percent(count, len(active))} |"
         )
 
     lines.extend(
@@ -1919,7 +1881,7 @@ def write_analysis_report(
     for macroblock, count in macroblock_counts.most_common():
         lines.append(
             f"| {macroblock_labels.get(macroblock, macroblock)} | "
-            f"{format_int(count)} | {percent(count, len(active))} |"
+            f"{format_count(count)} | {percent(count, len(active))} |"
         )
 
     document_type_counts = table_data["document_type_counts"]
@@ -1934,10 +1896,10 @@ def write_analysis_report(
         "не вважаються видами документів.",
         "",
         f"- Принаймні одну згадку знайдено: "
-        f"{format_int(table_data['document_type_matched'])} "
+        f"{format_count(table_data['document_type_matched'])} "
         f"({percent(table_data['document_type_matched'], len(active))}).",
         f"- Кілька типів у заголовку: "
-        f"{format_int(table_data['document_type_multi'])} "
+        f"{format_count(table_data['document_type_multi'])} "
         f"({percent(table_data['document_type_multi'], len(active))}).",
         "",
         "| Тип документа | Заголовків | Частка заголовків |",
@@ -1948,15 +1910,15 @@ def write_analysis_report(
     for document_type_id, count in document_type_counts.most_common():
         lines.append(
             f"| {document_type_labels[document_type_id]} | "
-            f"{format_int(count)} | {percent(count, len(active))} |"
+            f"{format_count(count)} | {percent(count, len(active))} |"
         )
 
     geography = table_data["geography"]
     lines.extend([
         "", "## Географічні згадки в заголовках", "",
         f"Версія географічного словника: `{load_places()[0]}`. Знайдено "
-        f"{format_int(len(geography['rows']))} пар «справа — населений пункт» "
-        f"у {format_int(geography['matched_cases'])} заголовках "
+        f"{format_count(len(geography['rows']))} пар «справа — населений пункт» "
+        f"у {format_count(geography['matched_cases'])} заголовках "
         f"({percent(geography['matched_cases'], len(active))}). "
         "Одна справа може згадувати кілька місць. Координати позначають "
         "приблизний сучасний центр міста, а не місце події. Назви установ "
@@ -1964,20 +1926,20 @@ def write_analysis_report(
         "не вважаються географічним доказом.",
         "",
         f"Назв із явним географічним префіксом, не зіставлених зі словником: "
-        f"{format_int(geography['unmapped_candidates'])}; "
+        f"{format_count(geography['unmapped_candidates'])}; "
         "перевіряйте `geography_unmapped_candidates.csv` перед доповненням словника.",
         "", "| Населений пункт | Згадок |", "|---|---:|",
     ])
     for place, count in geography["totals"].most_common(20):
-        lines.append(f"| {place} | {format_int(count)} |")
+        lines.append(f"| {place} | {format_count(count)} |")
 
     terminology = table_data["terminology"]
     lines.extend([
         "", "## Еволюція термінології та ідеологем", "",
         f"Версія лексичних правил: `{TERMINOLOGY_RULES_VERSION}`. Знайдено "
-        f"{format_int(terminology['matches'])} пар «термін — заголовок» "
-        f"у {format_int(terminology['titles'])} заголовках корпусу; "
-        f"датовано {format_int(terminology['dated_titles'])} заголовків. "
+        f"{format_count(terminology['matches'])} пар «термін — заголовок» "
+        f"у {format_count(terminology['titles'])} заголовках корпусу; "
+        f"датовано {format_count(terminology['dated_titles'])} заголовків. "
         "Кількість збігів може перевищувати кількість справ: одному заголовку "
         "можна надати кілька термінів. Графіки показують згадки в архівних "
         "заголовках, а не поширеність ідей або подій в історичному суспільстві. "
@@ -1988,9 +1950,9 @@ def write_analysis_report(
     theme_links = table_data["theme_links"]
     lines.extend([
         "", "## Зв’язки між темами справ / Мережа співкласифікації справ", "",
-        f"{format_int(theme_links['multi'])} із {format_int(theme_links['titles'])} "
+        f"{format_count(theme_links['multi'])} із {format_count(theme_links['titles'])} "
         "заголовків справ мають щонайменше дві предметні теми. "
-        f"Виявлено {format_int(theme_links['category_pairs'])} пар тем. "
+        f"Виявлено {format_count(theme_links['category_pairs'])} пар тем. "
         "Спільна справа може утворювати кілька пар. Для аналізу окремих "
         "описів відкрийте `figures/theme_links.html`; повні підрахунки містить "
         "`tables/theme_links_by_description.csv`, а перелік справ для "
@@ -2575,7 +2537,8 @@ def analyze_workbook(openpyxl_module, yaml_module, plt, categories, ambiguities,
         [INPUT_FILE, Path(__file__), BASE_DIR / "models.py", BASE_DIR / "text_matching.py",
          BASE_DIR / "document_types.py", BASE_DIR / "geography.py",
          BASE_DIR / "geography_maps.py", BASE_DIR / "terminology.py",
-         BASE_DIR / "theme_links.py", BASE_DIR / "html_report.py", THEME_LINKS_TEMPLATE,
+         BASE_DIR / "theme_links.py", BASE_DIR / "html_report.py",
+         BASE_DIR / "report_utils.py", THEME_LINKS_TEMPLATE,
          GEOGRAPHY_BASEMAP, GEOGRAPHY_TEMPLATE, TERMINOLOGY_TEMPLATE]
         + sorted(CONFIG_DIR.glob("*.yaml"))
         + sorted(DICTIONARIES_DIR.rglob("*.yaml"))

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from geography import BASEMAP
+from report_utils import json_for_script
 
 
 TEMPLATE = Path(__file__).resolve().parent / "maps" / "map-template.html"
@@ -15,11 +16,6 @@ VIEWS = {
     "europe": ("Європа", [[35.0, -12.0], [63.0, 50.0]]),
     "russia": ("Європейська частина РФ", [[43.0, 28.0], [62.5, 61.0]]),
 }
-
-
-def json_for_script(data: Any) -> str:
-    """Protect a script element even when a source title contains HTML."""
-    return json.dumps(data, ensure_ascii=False, separators=(",", ":")).replace("<", "\\u003c")
 
 
 def write_maps(

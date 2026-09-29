@@ -70,4 +70,7 @@ class Record:
     context_evidence: dict[str, list[str]] = field(default_factory=dict)
     review_flags: list[str] = field(default_factory=list)
 
-
+    @property
+    def record_uid(self) -> str:
+        """Source, sheet and physical row identify a record within a workbook."""
+        return f"{self.source_id}:{self.sheet_name}:{self.excel_row}"
