@@ -11,3 +11,10 @@ exports:
   csv: true
   unclassified_file: некласифіковані.xlsx
   service_records_file: службові_записи.xlsx
+
+
+# Мова лише візуалізацій: uk (типово) або en. Аналіз і CSV не змінюються.
+visualization:
+  language: uk
+  bilingual_labels: false
+  label_overrides: {}

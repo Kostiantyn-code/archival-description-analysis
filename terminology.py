@@ -13,6 +13,7 @@ from typing import Callable
 
 from report_utils import json_for_script, write_csv
 from models import Record
+from visualization import Visualization
 
 
 RULES_VERSION = "0.1-draft"
@@ -88,8 +89,10 @@ def write_terminology_report(
     active: list[Record], sheets: list[str], labels: dict[str, str],
     colors: dict[str, str], decade_of: Callable[[Record], int | None],
     tables_dir: Path, figures_dir: Path, scope: str,
+    visual: Visualization | None = None,
 ) -> dict[str, int]:
     """Write exact counts and an offline interactive report for one workbook scope."""
+    visual = visual or Visualization()
     denominators: Counter[tuple[str, int]] = Counter()
     hits: Counter[tuple[str, int, str]] = Counter()
     index: list[dict] = []
@@ -131,9 +134,10 @@ def write_terminology_report(
               extrasaction="raise", create_parent=False)
 
     data = {
-        "terms": [{"id": t[0], "label": t[1], "group": t[2]} for t in TERMS],
-        "groups": GROUPS, "periods": periods, "descriptions": sheets,
-        "labels": [labels[s] for s in sheets], "colors": [colors[s] for s in sheets],
+        "terms": [{"id": t[0], "label": visual.label("terms", t[0], t[1]), "group": t[2]} for t in TERMS],
+        "groups": [(key, visual.label("term_groups", key, label))
+                   for key, label in GROUPS], "periods": periods, "descriptions": sheets,
+        "labels": [visual.description(s, labels[s]) for s in sheets], "colors": [colors[s] for s in sheets],
         "bases": {sheet: {d: denominators[sheet, d] for d in periods}
                   for sheet in ["all", *sheets]},
         "values": {sheet: {d: {t[0]: hits[sheet, d, t[0]] for t in TERMS} for d in periods}
@@ -141,11 +145,12 @@ def write_terminology_report(
         "examples": {t[0]: _examples(index, t[0], sheets) for t in TERMS},
     }
     payload = json_for_script(data)
-    period_label = (f"{min(periods)}–{max(periods)}-ті" if periods else "немає датованих справ")
-    page = (TEMPLATE.read_text(encoding="utf-8")
+    period_label = (f"{min(periods)}–{max(periods)}{visual.text('-ті')}"
+                    if periods else visual.text("немає датованих справ"))
+    page = (visual.template(TEMPLATE.read_text(encoding="utf-8"))
             .replace("__DATA__", payload)
             .replace("__TITLE_COUNT__", f"{len(active):,}".replace(",", " "))
-            .replace("__SCOPE__", html.escape(scope))
+            .replace("__SCOPE__", html.escape(visual.text(scope)))
             .replace("__DECADE_RANGE__", period_label)
             .replace("__TERM_COUNT__", str(len(TERMS))))
     (figures_dir / "terminology_evolution.html").write_text(page, encoding="utf-8")

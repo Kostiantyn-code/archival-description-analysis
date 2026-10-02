@@ -8,6 +8,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from models import Issue, Record
+from visualization import Visualization
 
 
 CHARTS = {
@@ -75,8 +76,10 @@ def write_html_report(
     root: Path, workbook_name: str, scopes: dict[str, list[Record]],
     issues: list[Issue], script_version: str, dictionary_version: str,
     macroblock_labels: dict[str, str],
+    visual: Visualization | None = None,
 ) -> Path:
     """Write one report per workbook; combined is not added to fond totals."""
+    visual = visual or Visualization()
     sections, navigation = [], []
     ordered = sorted(scopes, key=lambda key: (key != "combined", key))
     for number, scope in enumerate(ordered):
@@ -132,13 +135,14 @@ def write_html_report(
             ("percent_of_analyzed_titles", "% усіх справ зрізу")])
         charts = []
         for stem, label in CHARTS.items():
+            label = visual.text(label)
             image = next((figures / (stem + suffix) for suffix in (".png", ".svg")
                           if (figures / (stem + suffix)).is_file()), None)
             if image:
                 charts.append(f'<figure><img loading="lazy" src="{_url(image, root)}" alt="{_escape(label)}">'
                               f'<figcaption>{_escape(label)}</figcaption></figure>')
         chart_html = "".join(charts) or '<p class="muted">Статичні графіки не створено. Таблиці та інтерактивні звіти доступні нижче.</p>'
-        interactive = "".join(f"<li>{_link(figures / name, root, label)}</li>"
+        interactive = "".join(f"<li>{_link(figures / name, root, visual.text(label))}</li>"
                               for name, label in INTERACTIVE.items() if (figures / name).is_file())
         interactive = f'<ul class="interactive">{interactive}</ul>' if interactive else "<p>Інтерактивні звіти відсутні.</p>"
         report_files = _files(reports.glob("*"), root)
