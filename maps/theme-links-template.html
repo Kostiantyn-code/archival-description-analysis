@@ -65,6 +65,8 @@
 <script>
 (()=>{
  const root=document.getElementById('theme-links-report'), data=JSON.parse(root.querySelector('#tl-data').textContent), $=id=>root.querySelector('#'+id);
+ if(data.meta.bilingual)$('tl-svg').setAttribute('viewBox','0 0 850 620');
+ function wrapLabel(text,width){const lines=[''];for(const word of text.split(/\s+/)){const last=lines.length-1;if(lines[last]&&lines[last].length+word.length+1>width)lines.push(word);else lines[last]+=(lines[last]?' ':'')+word}return lines}
  const ns='http://www.w3.org/2000/svg'; const el=(tag,attrs={})=>{const n=document.createElementNS(ns,tag);for(const [k,v] of Object.entries(attrs))n.setAttribute(k,v);return n};
  const escape=s=>String(s).replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
  const fmt=n=>new Intl.NumberFormat('uk-UA').format(n), fmtLift=n=>new Intl.NumberFormat('uk-UA',{maximumFractionDigits:2}).format(n);
@@ -110,8 +112,10 @@
    if(kind==='cat'&&x<290){anchor='end';tx=x-15;ty=y+4}
    else if(kind==='cat'&&x>565){anchor='start';tx=x+15;ty=y+4}
    else if(kind==='block'){anchor=x<400?'end':'start';tx=x+(x<400?-28:28);ty=y+3}
-   const txt=el('text',{x:tx,y:ty,'text-anchor':anchor,class:'node-label'});txt.textContent=labels(kind,id,true);group.append(txt);
-   const sub=el('text',{x:tx,y:ty+14,'text-anchor':anchor,class:'node-count'});sub.textContent=fmt(n)+' справ';group.append(sub);
+   const txt=el('text',{x:tx,y:ty,'text-anchor':anchor,class:'node-label'}),label=labels(kind,id,true);
+   const lines=data.meta.bilingual?wrapLabel(label,24):[label];
+   lines.forEach((text,i)=>{const span=el('tspan',{x:tx,dy:i?14:0});span.textContent=text;txt.append(span)});group.append(txt);
+   const sub=el('text',{x:tx,y:ty+14*lines.length,'text-anchor':anchor,class:'node-count'});sub.textContent=fmt(n)+' справ';group.append(sub);
    function choose(){const e=display.find(e=>e.a===id||e.b===id);if(e)selectEdge(e)}
    group.addEventListener('click',choose);group.addEventListener('keydown',ev=>{if(ev.key==='Enter'||ev.key===' '){ev.preventDefault();choose()}});svg.append(group);
   }

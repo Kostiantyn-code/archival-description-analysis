@@ -13,6 +13,7 @@ from io import BytesIO
 from collections import Counter, defaultdict
 from datetime import datetime
 from pathlib import Path
+from textwrap import fill
 from typing import Any, Iterable
 
 
@@ -24,6 +25,7 @@ from terminology import RULES_VERSION as TERMINOLOGY_RULES_VERSION, TEMPLATE as 
 from theme_links import TEMPLATE as THEME_LINKS_TEMPLATE, write_theme_links
 from html_report import write_html_report
 from report_utils import write_csv
+from visualization import Visualization, CATALOG as VISUALIZATION_CATALOG
 from text_matching import (
     MATCH_LANGUAGE,
     YEAR_HEADING_RE,
@@ -114,6 +116,7 @@ def configure_analysis(yaml_module) -> None:
     global MIN_ALLOWED_YEAR, MAX_ALLOWED_YEAR
     path = config_path("analysis.yaml")
     config = safe_load_yaml(path, yaml_module)
+    Visualization.from_config(config)  # Validate presentation settings before analysis.
     ANALYSIS_CONFIG = config
 
     input_name = str(config.get("input_dir", "input"))
@@ -2175,7 +2178,9 @@ def draw_stacked_bars(
     component_labels: dict[str, str],
     *,
     horizontal: bool = False,
+    visual: Visualization | None = None,
 ) -> list[int]:
+    visual = visual or Visualization()
     totals = [
         sum(values[component][index] for component in components)
         for index in range(len(labels))
@@ -2209,7 +2214,7 @@ def draw_stacked_bars(
     for index, total in enumerate(totals):
         if not total:
             continue
-        total_label = f"Усього: {total}"
+        total_label = f"{visual.text('Усього:')} {total}"
         if horizontal:
             ax.text(
                 total + margin, index, total_label,
@@ -2221,7 +2226,7 @@ def draw_stacked_bars(
                 ha="center", fontsize=8, fontweight="bold",
             )
     ax.legend(
-        title="Архівний опис",
+        title=visual.text("Архівний опис"),
         loc="lower center",
         bbox_to_anchor=(0.5, 1.03),
         ncol=min(len(components), 3),
@@ -2232,7 +2237,9 @@ def draw_stacked_bars(
     return totals
 
 
-def create_figures(plt, records, categories, table_data) -> bool:
+def create_figures(plt, records, categories, table_data,
+                   visual: Visualization | None = None) -> bool:
+    visual = visual or Visualization()
     if plt is None:
         print(
             "Увага: matplotlib не встановлено, тому графіки пропущено.\n"
@@ -2256,7 +2263,8 @@ def create_figures(plt, records, categories, table_data) -> bool:
     breakdowns = build_chart_breakdowns(records, active)
     components = breakdowns["components"]
     colors = breakdowns["colors"]
-    component_labels = breakdowns["labels"]
+    component_labels = {s: visual.description(s, configured_description_label(s))
+                        for s in components}
 
     decades = sorted(decade_counts)
     decade_labels = [f"{decade}–{decade + 9}" for decade in decades]
@@ -2266,11 +2274,11 @@ def create_figures(plt, records, categories, table_data) -> bool:
     }
     _, ax = plt.subplots(figsize=(10, 5.6))
     draw_stacked_bars(
-        ax, decade_labels, components, decade_values, colors, component_labels
+        ax, decade_labels, components, decade_values, colors, component_labels, visual=visual
     )
-    ax.set_title("Розподіл заголовків за десятиліттями")
-    ax.set_xlabel("Початковий рік із дат або, за його відсутності, рік групи")
-    ax.set_ylabel("Кількість справ")
+    ax.set_title(visual.text("Розподіл заголовків за десятиліттями"))
+    ax.set_xlabel(visual.text("Початковий рік із дат або, за його відсутності, рік групи"))
+    ax.set_ylabel(visual.text("Кількість справ"))
     ax.tick_params(axis="x", rotation=45)
     for label in ax.get_xticklabels():
         label.set_ha("right")
@@ -2297,16 +2305,18 @@ def create_figures(plt, records, categories, table_data) -> bool:
                 linewidth=1.8,
             )
             axis.set_title(component_labels[component], loc="left", fontsize=10)
-            axis.set_ylabel("Справ")
+            axis.set_ylabel(visual.text("Справ"))
             axis.grid(alpha=0.22)
             axis.set_axisbelow(True)
-        axes[-1][0].set_xlabel("Рік")
-        figure.suptitle("Хронологічний розподіл справ", fontsize=13)
+        axes[-1][0].set_xlabel(visual.text("Рік"))
+        figure.suptitle(visual.text("Хронологічний розподіл справ"), fontsize=13)
         save_figure(plt, "cases_by_year")
 
     ordered = category_counts.most_common()
     category_ids = [item[0] for item in ordered][::-1]
-    labels = [category_by_id[category_id].label for category_id in category_ids]
+    labels = [category_by_id[key].label if visual.language == "uk" else
+              fill(visual.label("categories", key, category_by_id[key].label), 45)
+              for key in category_ids]
     category_values = {
         component: [
             breakdowns["categories"][component][category_id]
@@ -2314,13 +2324,15 @@ def create_figures(plt, records, categories, table_data) -> bool:
         ]
         for component in components
     }
-    _, ax = plt.subplots(figsize=(10, 6.5))
+    _, ax = plt.subplots(figsize=(12 if visual.bilingual else 10,
+                                  6.5 if visual.language == "uk" else
+                                  max(6.5, sum(label.count("\n") + 1 for label in labels) * 0.3)))
     draw_stacked_bars(
         ax, labels, components, category_values, colors, component_labels,
-        horizontal=True,
+        horizontal=True, visual=visual,
     )
-    ax.set_title("Тематична структура заголовків справ")
-    ax.set_xlabel("Кількість справ")
+    ax.set_title(visual.text("Тематична структура заголовків справ"))
+    ax.set_xlabel(visual.text("Кількість справ"))
     ax.grid(axis="x", alpha=0.25)
     ax.set_axisbelow(True)
     save_figure(plt, "thematic_categories")
@@ -2329,7 +2341,9 @@ def create_figures(plt, records, categories, table_data) -> bool:
     if document_type_counts:
         document_type_ids = [key for key, _ in document_type_counts.most_common()][::-1]
         document_type_by_id = {item.id: item for item in DOCUMENT_TYPES}
-        document_type_labels = [document_type_by_id[key].label
+        document_type_labels = [document_type_by_id[key].label if visual.language == "uk" else
+                                fill(visual.label("document_types", key,
+                                                  document_type_by_id[key].label), 42)
                                 for key in document_type_ids]
         document_type_values = {
             component: [table_data["document_type_by_sheet"][component][key]
@@ -2338,27 +2352,33 @@ def create_figures(plt, records, categories, table_data) -> bool:
         }
         figure, (axis, details) = plt.subplots(
             1, 2, sharey=True,
-            figsize=(16, max(7.0, len(document_type_ids) * 0.48 + 1.8)),
+            figsize=(18 if visual.bilingual else 16,
+                     max(7.0, len(document_type_ids) * 0.48 + 1.8) if visual.language == "uk" else
+                     max(7.0, sum(label.count("\n") + 1 for label in document_type_labels) * 0.4 + 1.8)),
             gridspec_kw={"width_ratios": [3.8, 1.8]},
         )
         draw_stacked_bars(
             axis, document_type_labels, components,
             document_type_values, colors, component_labels,
-            horizontal=True,
+            horizontal=True, visual=visual,
         )
-        axis.set_title("Згадки типів документів у заголовках справ")
-        axis.set_xlabel("Кількість заголовків")
+        axis.set_title(visual.text("Згадки типів документів у заголовках справ"))
+        axis.set_xlabel(visual.text("Кількість заголовків"))
         axis.grid(axis="x", alpha=0.25)
         axis.set_axisbelow(True)
         axis.set_xlim(right=max(document_type_counts.values()) * 1.22)
 
         details.axis("off")
         details.set_xlim(0, len(components))
-        details.set_title("За архівними описами", fontsize=10)
+        details.set_title(visual.text("За архівними описами"), fontsize=10)
         for column, component in enumerate(components):
             source = SOURCE_CONFIG.get(component, {})
             header = (f"{source.get('archive', component)}\n"
                       f"ф. {source.get('fond', '')}, оп. {source.get('inventory', '')}")
+            if visual.language == "en":
+                header = fill(visual.reference(str(source.get('archive', component)),
+                                              str(source.get('fond', '')),
+                                              str(source.get('inventory', ''))), 28)
             details.text(column + 0.5, len(document_type_ids) - 0.13,
                          header, ha="center", va="bottom", fontsize=7,
                          clip_on=False)
@@ -2372,6 +2392,7 @@ def create_figures(plt, records, categories, table_data) -> bool:
     coverage_labels = [
         "Предметну тему\nвизначено", "Лише контекст", "Не визначено"
     ]
+    coverage_labels = [visual.text(label) for label in coverage_labels]
     coverage_values = {
         component: [
             breakdowns["coverage"][component][key] for key in coverage_keys
@@ -2381,16 +2402,16 @@ def create_figures(plt, records, categories, table_data) -> bool:
     _, ax = plt.subplots(figsize=(8.4, 5.2))
     draw_stacked_bars(
         ax, coverage_labels, components, coverage_values, colors,
-        component_labels,
+        component_labels, visual=visual,
     )
-    ax.set_title("Покриття класифікаційними словниками")
-    ax.set_ylabel("Кількість справ")
+    ax.set_title(visual.text("Покриття класифікаційними словниками"))
+    ax.set_ylabel(visual.text("Кількість справ"))
     ax.grid(axis="y", alpha=0.25)
     ax.set_axisbelow(True)
     save_figure(plt, "classification_coverage")
 
     status_keys = ["case", "withdrawn"]
-    status_labels = ["Включено до аналізу", "Вибулі"]
+    status_labels = [visual.text(label) for label in ("Включено до аналізу", "Вибулі")]
     status_values = {
         component: [
             breakdowns["statuses"][component][key] for key in status_keys
@@ -2399,10 +2420,10 @@ def create_figures(plt, records, categories, table_data) -> bool:
     }
     _, ax = plt.subplots(figsize=(8.4, 5.2))
     draw_stacked_bars(
-        ax, status_labels, components, status_values, colors, component_labels
+        ax, status_labels, components, status_values, colors, component_labels, visual=visual
     )
-    ax.set_title("Справи, включені до аналізу, та вибулі записи")
-    ax.set_ylabel("Кількість записів")
+    ax.set_title(visual.text("Справи, включені до аналізу, та вибулі записи"))
+    ax.set_ylabel(visual.text("Кількість записів"))
     ax.grid(axis="y", alpha=0.25)
     ax.set_axisbelow(True)
     save_figure(plt, "included_and_withdrawn")
@@ -2413,9 +2434,11 @@ def create_figures(plt, records, categories, table_data) -> bool:
             [theme_decades[category_id][decade] for decade in decades]
             for category_id in category_ids
         ]
-        plt.figure(figsize=(11, 7))
+        plt.figure(figsize=(13 if visual.bilingual else 11,
+                            7 if visual.language == "uk" else
+                            max(7, len(category_ids) * (0.7 if visual.bilingual else 0.5))))
         image = plt.imshow(matrix, aspect="auto", cmap="Blues")
-        plt.colorbar(image, label="Кількість справ")
+        plt.colorbar(image, label=visual.text("Кількість справ"))
         plt.xticks(
             range(len(decades)),
             [f"{decade}–{str(decade + 9)[-2:]}" for decade in decades],
@@ -2423,10 +2446,12 @@ def create_figures(plt, records, categories, table_data) -> bool:
         )
         plt.yticks(
             range(len(category_ids)),
-            [category_by_id[category_id].label for category_id in category_ids],
+            [category_by_id[key].label if visual.language == "uk" else
+             fill(visual.label("categories", key, category_by_id[key].label), 45)
+             for key in category_ids],
         )
-        plt.title("Динаміка тематичних категорій за десятиліттями")
-        plt.xlabel("Десятиліття")
+        plt.title(visual.text("Динаміка тематичних категорій за десятиліттями"))
+        plt.xlabel(visual.text("Десятиліття"))
         save_figure(plt, "themes_by_decade")
     return True
 
@@ -2461,6 +2486,7 @@ def print_summary(records, issues, table_data, figures_created) -> None:
 def analyze_workbook(openpyxl_module, yaml_module, plt, categories, ambiguities,
                      macroblock_labels, dictionary_version, run_id) -> dict[str, Any]:
     global RUN_DIR, REPORTS_DIR, FIGURES_DIR, WORK_DIR, THEMATIC_DIR
+    visual = Visualization.from_config(ANALYSIS_CONFIG)
     configure_workbook_sources(openpyxl_module)
     print(f"Вхідний файл: {INPUT_FILE.name}; аркуші: {', '.join(SHEET_NAMES)}")
     REPORTS_DIR = RUN_DIR / "reports"
@@ -2502,20 +2528,23 @@ def analyze_workbook(openpyxl_module, yaml_module, plt, categories, ambiguities,
             chart_sheet_colors(sheets_for_map), get_decade,
             WORK_DIR, FIGURES_DIR,
             "Спільний зріз" if scope == "combined" else scope,
+            visual=visual,
         )
         table_data["theme_links"] = write_theme_links(
             table_data["active"], sheets_for_map,
             {s: configured_description_label(s) for s in sheets_for_map},
             categories, macroblock_labels, WORK_DIR, FIGURES_DIR,
             "Спільний зріз" if scope == "combined" else scope,
+            visual=visual,
         )
         write_error_log(scoped_issues, subset)
-        figures_created = create_figures(plt, subset, categories, table_data)
+        figures_created = create_figures(plt, subset, categories, table_data, visual)
         write_geography_maps(
             FIGURES_DIR, table_data["geography"]["rows"], sheets_for_map,
             {s: configured_description_label(s) for s in sheets_for_map},
             chart_sheet_colors(sheets_for_map),
             "Спільний зріз" if scope == "combined" else scope,
+            visual=visual,
         )
         write_analysis_report(subset, scoped_issues, categories, macroblock_labels,
                               table_data, figures_created, dictionary_version)
@@ -2538,7 +2567,8 @@ def analyze_workbook(openpyxl_module, yaml_module, plt, categories, ambiguities,
          BASE_DIR / "document_types.py", BASE_DIR / "geography.py",
          BASE_DIR / "geography_maps.py", BASE_DIR / "terminology.py",
          BASE_DIR / "theme_links.py", BASE_DIR / "html_report.py",
-         BASE_DIR / "report_utils.py", THEME_LINKS_TEMPLATE,
+         BASE_DIR / "report_utils.py", BASE_DIR / "visualization.py",
+         VISUALIZATION_CATALOG, THEME_LINKS_TEMPLATE,
          GEOGRAPHY_BASEMAP, GEOGRAPHY_TEMPLATE, TERMINOLOGY_TEMPLATE]
         + sorted(CONFIG_DIR.glob("*.yaml"))
         + sorted(DICTIONARIES_DIR.rglob("*.yaml"))
@@ -2555,6 +2585,7 @@ def analyze_workbook(openpyxl_module, yaml_module, plt, categories, ambiguities,
         "python": platform.python_version(),
         "openpyxl": openpyxl_module.__version__,
         "pyyaml": yaml_module.__version__,
+        "visualization": visual.metadata(),
         "configured_sheets": list(SHEET_NAMES),
         "sources": SOURCE_CONFIG,
         "header_rows": HEADER_ROWS_BY_SHEET,
@@ -2572,7 +2603,7 @@ def analyze_workbook(openpyxl_module, yaml_module, plt, categories, ambiguities,
         json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
     )
     write_html_report(RUN_DIR, INPUT_FILE.name, scopes, issues,
-                      SCRIPT_VERSION, dictionary_version, macroblock_labels)
+                      SCRIPT_VERSION, dictionary_version, macroblock_labels, visual=visual)
     manifest["outputs"] = sorted(path.relative_to(RUN_DIR).as_posix()
                                  for path in RUN_DIR.rglob("*") if path.is_file())
     (RUN_DIR / "run_manifest.json").write_text(

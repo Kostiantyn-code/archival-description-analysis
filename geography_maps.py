@@ -8,6 +8,7 @@ from typing import Any
 
 from geography import BASEMAP
 from report_utils import json_for_script
+from visualization import Visualization
 
 
 TEMPLATE = Path(__file__).resolve().parent / "maps" / "map-template.html"
@@ -25,14 +26,16 @@ def write_maps(
     labels: dict[str, str],
     colors: dict[str, str],
     title: str,
+    visual: Visualization | None = None,
 ) -> None:
     """Create three independent HTML files with embedded geography and data."""
+    visual = visual or Visualization()
     destination.mkdir(parents=True, exist_ok=True)
     sites: dict[str, dict[str, Any]] = {}
     for row in mentions:
         name = row["place"]
         site = sites.setdefault(name, {
-            "name": name, "lat": row["latitude"], "lon": row["longitude"],
+            "name": visual.label("places", name, name), "lat": row["latitude"], "lon": row["longitude"],
             "byDecade": {},
         })
         for decade in ("all", str(row["decade"])):
@@ -46,7 +49,12 @@ def write_maps(
                     f"{row['archive']}, ф. {row['fond']}, оп. {row['inventory']}, "
                     f"спр. {row['case_id']}: {row['title'][:240]}"
                 )
-    template = TEMPLATE.read_text(encoding="utf-8")
+                if visual.language == "en":
+                    bucket["sample"][index] = (
+                        f"{visual.reference(row['archive'], row['fond'], row['inventory'])}, "
+                        f"case file {row['case_id']}: {row['title'][:240]}"
+                    )
+    template = visual.template(TEMPLATE.read_text(encoding="utf-8"))
     basemap = json.loads(BASEMAP.read_text(encoding="utf-8"))
     decades = sorted({str(row["decade"]) for row in mentions
                       if row["decade"] != "unknown"}, key=int)
@@ -54,16 +62,16 @@ def write_maps(
         "__PLACES__": json_for_script(list(sites.values())),
         "__BASEMAP__": json_for_script(basemap),
         "__DECADES__": json_for_script(decades),
-        "__LABELS__": json_for_script([labels[s] for s in sheets]),
+        "__LABELS__": json_for_script([visual.description(s, labels[s]) for s in sheets]),
         "__COLORS__": json_for_script([colors[s] for s in sheets]),
         "__BOUNDS__": json_for_script({key: val[1] for key, val in VIEWS.items()}),
-        "__SCOPE__": html.escape(title),
+        "__SCOPE__": html.escape(visual.text(title)),
     }
     for view, (name, _) in VIEWS.items():
         page = template
         for placeholder, value in common.items():
             page = page.replace(placeholder, value)
-        page = page.replace("__PAGE_TITLE__", html.escape(f"Географічні згадки · {name}"))
-        page = page.replace("__VIEW_NAME__", html.escape(name))
+        page = page.replace("__PAGE_TITLE__", html.escape(f"{visual.text('Географічні згадки')} · {visual.text(name)}"))
+        page = page.replace("__VIEW_NAME__", html.escape(visual.text(name)))
         page = page.replace("__INITIAL_VIEW__", json_for_script(view))
         (destination / f"geography_{view}.html").write_text(page, encoding="utf-8")

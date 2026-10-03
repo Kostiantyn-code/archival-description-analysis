@@ -8,6 +8,7 @@ from pathlib import Path
 
 from report_utils import json_for_script, write_csv
 from models import Category, Record
+from visualization import Visualization
 
 
 TEMPLATE = Path(__file__).resolve().parent / "maps" / "theme-links-template.html"
@@ -22,9 +23,11 @@ CASE_FIELDS = (
 )
 
 
-def _example(record: Record) -> dict[str, str]:
+def _example(record: Record, visual: Visualization) -> dict[str, str]:
+    reference = (visual.reference(record.source_archive, record.source_fond, record.source_inventory)
+                 + f", case file {record.case_id_normalized or record.case_id_raw}")
     return {
-        "ref": (f"{record.source_archive}, ф. {record.source_fond}, "
+        "ref": reference if visual.language == "en" else (f"{record.source_archive}, ф. {record.source_fond}, "
                 f"оп. {record.source_inventory}, "
                 f"спр. {record.case_id_normalized or record.case_id_raw}"),
         "title": record.title_raw,
@@ -32,7 +35,7 @@ def _example(record: Record) -> dict[str, str]:
     }
 
 
-def _examples(records: list[Record]) -> list[dict[str, str]]:
+def _examples(records: list[Record], visual: Visualization) -> list[dict[str, str]]:
     """Include distinct archives when possible and avoid repeating one case."""
     selected: list[Record] = []
     archives: set[str] = set()
@@ -47,19 +50,21 @@ def _examples(records: list[Record]) -> list[dict[str, str]]:
             break
         if record not in selected:
             selected.append(record)
-    return [_example(record) for record in selected]
+    return [_example(record, visual) for record in selected]
 
 
 def write_theme_links(
     records: list[Record], sheets: list[str], sheet_labels: dict[str, str],
     categories: list[Category], macroblock_labels: dict[str, str],
     tables_dir: Path, figures_dir: Path, scope_title: str,
+    visual: Visualization | None = None,
 ) -> dict[str, int]:
     """Write one standalone network and auditable pair counts per description.
 
     Only subject assignments from ``record.categories`` and their macroblocks
     participate. Context-only category mentions are deliberately excluded.
     """
+    visual = visual or Visualization()
     active = [record for record in records if record.status == "case"]
     configured_categories = {category.id: category.label for category in categories}
     blocks = dict(macroblock_labels)
@@ -118,7 +123,7 @@ def write_theme_links(
                     "a": a, "b": b, "count": shared,
                     "lift": round(lift, 3) if lift is not None else None,
                     "rate": round(rate, 3) if rate is not None else None,
-                    "examples": _examples(pair_records[pair]),
+                    "examples": _examples(pair_records[pair], visual),
                 })
             breakdown[sheet][level] = {
                 "total": len(subset), "multi": multi,
@@ -144,23 +149,28 @@ def write_theme_links(
     }
     data = {
         "meta": {
-            "cat": configured_categories,
-            "short": {id_: abbreviations.get(id_, label[:21] + "…" if len(label) > 22 else label)
+            "bilingual": visual.bilingual,
+            "cat": {key: visual.label("categories", key, label)
+                    for key, label in configured_categories.items()},
+            "short": {id_: visual.label("category_short", id_,
+                                       abbreviations.get(id_, label[:21] + "…" if len(label) > 22 else label))
                       for id_, label in configured_categories.items()},
-            "block": blocks,
-            "blockShort": {id_: block_short.get(id_, label[:21] + "…" if len(label) > 22 else label)
+            "block": {key: visual.label("macroblocks", key, label)
+                      for key, label in blocks.items()},
+            "blockShort": {id_: visual.label("macroblock_short", id_,
+                                            block_short.get(id_, label[:21] + "…" if len(label) > 22 else label))
                            for id_, label in blocks.items()},
             "catOrder": list(configured_categories),
             "catBlock": {category.id: category.macroblock for category in categories},
-            "descriptions": [[s, sheet_labels[s]] for s in sheets],
-            "scopes": [["__all__", "Усі описи"], *[[s, sheet_labels[s]] for s in sheets]],
+            "descriptions": [[s, visual.description(s, sheet_labels[s])] for s in sheets],
+            "scopes": [["__all__", visual.text("Усі описи")], *[[s, visual.description(s, sheet_labels[s])] for s in sheets]],
         },
         "scopes": breakdown,
     }
     payload = json_for_script(data)
-    page = (TEMPLATE.read_text(encoding="utf-8")
+    page = (visual.template(TEMPLATE.read_text(encoding="utf-8"))
             .replace("__DATA__", payload)
-            .replace("__SCOPE__", html.escape(scope_title)))
+            .replace("__SCOPE__", html.escape(visual.text(scope_title))))
     (figures_dir / "theme_links.html").write_text(page, encoding="utf-8")
     return {
         "titles": len(active), "multi": breakdown["__all__"]["cat"]["multi"],
