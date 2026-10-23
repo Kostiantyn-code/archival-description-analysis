@@ -183,5 +183,9 @@
   "Номер повторюється у рядках {0}. {1}": "The number occurs in rows {0}. {1}",
   "рядок {0}: {1}": "row {0}: {1}",
   "{0}: кількість аркушів не заповнено у {1} заголовках; зведене попередження.": "{0}: folio counts are missing for {1} titles; consolidated warning.",
-  "Для мов {0} тематичні словники відсутні. Класифікацію пропущено; нульове покриття не характеризує зміст документів.": "No thematic dictionaries are available for: {0}. Classification was skipped. Zero coverage does not describe the contents of the records."
+  "Для мов {0} тематичні словники відсутні. Класифікацію пропущено; нульове покриття не характеризує зміст документів.": "No thematic dictionaries are available for: {0}. Classification was skipped. Zero coverage does not describe the contents of the records.",
+  "Словники мов {0} є робочими та не пройшли незалежної експертної валідації. Покриття класифікацією не є оцінкою точності.": "The language dictionaries for {0} are development versions without independent expert validation. Classification coverage is not an estimate of accuracy.",
+  "Для мов {0} не підключено словник типів документів. Нульові значення не доводять відсутності згадок.": "No document-type vocabulary is configured for {0}. Zero counts do not establish the absence of mentions.",
+  "Для мов {0} не підключено термінологічний словник. Нульові значення не доводять відсутності згадок.": "No terminology vocabulary is configured for {0}. Zero counts do not establish the absence of mentions.",
+  "Для мов {0} не підключено географічний словник. Нульові значення не доводять відсутності згадок.": "No geographical vocabulary is configured for {0}. Zero counts do not establish the absence of mentions."
 }

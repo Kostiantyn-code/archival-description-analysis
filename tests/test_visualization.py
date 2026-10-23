@@ -70,7 +70,7 @@ class VisualizationTests(unittest.TestCase):
             root = Path(tmp)
             (root / "input").mkdir()
             workbook(root / "input/book.xlsx", [
-                ("one", "ДАМО", 230, 1, "Листування про школу в м. Миколаїв і політичний нагляд")])
+                ("one", "ДАМО", 230, 1, "Листування про школу в м. Миколаїв: відкриття і політичний нагляд")])
             config = {"input_dir": str(root / "input"), "output_root": str(root / "outputs"),
                       "exports": {"enabled": False}, "visualization": {
                           "language": "en", "bilingual_labels": True,
@@ -109,7 +109,7 @@ class VisualizationTests(unittest.TestCase):
     def test_same_tables_and_analysis_in_all_modes(self):
         categories, ambiguities, blocks, _ = f.load_dictionaries(yaml)
         records = [
-            f.Record(5, "Опис 1", "1", "1", "Листування про школу в м. Миколаїв і політичний нагляд",
+            f.Record(5, "Опис 1", "1", "1", "Листування про школу в м. Миколаїв: відкриття і політичний нагляд",
                      "1854", "8", "", "case", None, start_year=1854, end_year=1854,
                      source_archive="ДАМО", source_fond="230", source_inventory="1", source_id="damo"),
             f.Record(6, "Опис 2", "2", "2", "Рапорт про лікарню в м. Одеса і паспорт міщанина",

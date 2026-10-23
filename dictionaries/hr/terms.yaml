@@ -1,0 +1,733 @@
+schema_version: 1
+language: hr
+version: 1.0-reviewed-draft
+reference_version: 1.0-reviewed-draft
+validation_status: structural_and_contrastive_checks_only
+provenance:
+  terms: Author-composed conceptual equivalents and explicit word forms. Not an official UDC translation.
+  alignment: English reference concept IDs; broader UDC anchors inherited from that reference.
+  udc_reference_url: https://udcsummary.info/php/index.php?lang=hr
+  reviewed_on: '2026-10-23'
+  review_scope: Concept identity, scope, ambiguity and explicit word forms checked during software preparation;
+    no independent native-speaker certification or corpus accuracy claim.
+concepts:
+  political_activity:
+  - politika
+  - politička djelatnost
+  - političke djelatnosti
+  - izbori
+  - referendum
+  political_surveillance:
+  - politički nadzor
+  - političkog nadzora
+  - politički progon
+  - političkog progona
+  political_unrest:
+  - ustanak
+  - ustanka
+  - ustanci
+  - pobuna
+  - pobune
+  - revolucija
+  - revolucije
+  public_administration:
+  - javna uprava
+  - javne uprave
+  - državna uprava
+  - državne uprave
+  - upravna reforma
+  - upravne reforme
+  local_government:
+  - lokalna samouprava
+  - lokalne samouprave
+  - gradska uprava
+  - gradske uprave
+  - općinska uprava
+  - općinske uprave
+  administrative_appointment:
+  - imenovanje službenika
+  - imenovanja službenika
+  - imenovanje dužnosnika
+  administrative_actor:
+  - guverner
+  - guvernera
+  - gradonačelnik
+  - gradonačelnika
+  - službenik
+  - službenika
+  legal_proceedings:
+  - kazneni postupak
+  - kaznenog postupka
+  - sudski postupak
+  - sudskog postupka
+  - parnica
+  - parnice
+  - suđenje
+  - suđenja
+  policing:
+  - policijska istraga
+  - policijske istrage
+  - policijski nadzor
+  - policijskog nadzora
+  arrest_and_detention:
+  - uhićenje
+  - uhićenja
+  - hapšenje
+  - hapšenja
+  - lišenje slobode
+  - lišenja slobode
+  - pritvor
+  - pritvora
+  - zatvorska kazna
+  crime:
+  - krađa
+  - krađe
+  - pljačka
+  - pljačke
+  - ubojstvo
+  - ubojstva
+  - prijevara
+  - prijevare
+  - pronevjera
+  - tjelesna ozljeda
+  - tjelesne ozljede
+  property_law:
+  - imovinska prava
+  - imovinskih prava
+  - vlasnička prava
+  - nasljedni spor
+  - nasljedni sporovi
+  legal_actor:
+  - policija
+  - policije
+  - policajac
+  - policajca
+  - sudac
+  - suca
+  - sud
+  - suda
+  - tužitelj
+  - tužitelja
+  armed_forces:
+  - oružane snage
+  - oružanih snaga
+  - vojna služba
+  - vojne službe
+  - novačenje
+  - mobilizacija
+  - mobilizacije
+  naval_affairs:
+  - pomorske operacije
+  - pomorska služba
+  - ratna mornarica
+  - ratne mornarice
+  - ratni brod
+  - ratni brodovi
+  military_operations:
+  - vojne operacije
+  - vojna operacija
+  - vojna obrana
+  - bitka
+  - bitke
+  military_actor:
+  - vojnik
+  - vojnika
+  - časnik
+  - časnika
+  - admiral
+  - admirala
+  economic_activity:
+  - gospodarstvo
+  - gospodarstva
+  - ekonomija
+  - trgovina
+  - trgovine
+  - trgovačka djelatnost
+  taxation:
+  - porez
+  - porezi
+  - poreza
+  - oporezivanje
+  - naplata poreza
+  - carina
+  - carine
+  finance:
+  - financije
+  - kredit
+  - krediti
+  - bankarstvo
+  - proračun
+  - proračuna
+  - vrijednosni papiri
+  - gotov novac
+  - gotovina
+  economic_assets:
+  - roba
+  - robe
+  - pokućstvo
+  - namještaj
+  - pokućstvo i namještaj
+  - pokretna imovina
+  - nepokretna imovina
+  - ostala nepokretna i pokretna imovina
+  - pokućstva
+  agriculture:
+  - poljoprivreda
+  - poljoprivrede
+  - poljoprivredna proizvodnja
+  - zalihe žitarica
+  - poljoprivredne mašine
+  - poljoprivredni strojevi
+  - stoka
+  - stoke
+  - šumarstvo
+  economic_actor:
+  - trgovac
+  - trgovca
+  - trgovci
+  - bankar
+  - bankara
+  demography:
+  - demografija
+  - popis stanovništva
+  - popisi stanovništva
+  - statistika stanovništva
+  migration:
+  - migracija
+  - migracije
+  - doseljavanje
+  - iseljavanje
+  - izbjeglice
+  - izbjeglica
+  - preseljenje stanovništva
+  social_assistance:
+  - socijalna pomoć
+  - socijalne pomoći
+  - pomoć siromašnima
+  - dobrotvorna pomoć
+  - dobrotvorna djelatnost
+  labour:
+  - zapošljavanje
+  - radni uvjeti
+  - radnih uvjeta
+  - prisilni rad
+  - prisilnog rada
+  - iskorištavanje radne snage
+  personal_documentation:
+  - osobni dosje
+  - osobni dosjei
+  - osobni dosjei zaposlenika
+  - personalni dosje
+  - personalni dosjei
+  - evidencija zaposlenika
+  - popis zaposlenika
+  - popis učenika
+  - popisi učenika
+  - popis zatvorenika
+  healthcare:
+  - zdravstvena zaštita
+  - zdravstvene zaštite
+  - medicinska skrb
+  - liječenje
+  - liječenja
+  - liječnički pregled
+  - liječničkog pregleda
+  epidemic:
+  - epidemija
+  - epidemije
+  - kolera
+  - kolere
+  - kuga
+  - kuge
+  - velike boginje
+  - cijepljenje
+  - cijepljenja
+  public_health:
+  - javno zdravstvo
+  - javnoga zdravstva
+  - sanitarni nadzor
+  - sanitarnog nadzora
+  - karantenski propisi
+  - karantenskih propisa
+  medical_institution:
+  - bolnica
+  - bolnice
+  - bolnici
+  - bolnicu
+  - bolnicom
+  - klinika
+  - klinike
+  - ljekarna
+  - ljekarne
+  - karantenska postaja
+  - karantena
+  - karantene
+  medical_actor:
+  - liječnik
+  - liječnika
+  - liječnici
+  - doktor
+  - doktora
+  - kirurg
+  - kirurga
+  - primalja
+  - primalje
+  urban_planning:
+  - urbanizam
+  - urbanizma
+  - urbanističko planiranje
+  - gradska infrastruktura
+  - gradske infrastrukture
+  - komunalna infrastruktura
+  water_and_sanitation:
+  - vodoopskrba
+  - vodoopskrbe
+  - opskrba vodom
+  - kanalizacija
+  - kanalizacije
+  - odvodnja
+  - ulična rasvjeta
+  - ulične rasvjete
+  public_works:
+  - javni radovi
+  - javnih radova
+  - gradnja cesta
+  - izgradnja cesta
+  - gradnja mostova
+  - popravak ulica
+  - popravka ulica
+  building:
+  - zgrada
+  - zgrade
+  - zgradi
+  - zgradu
+  - kuća
+  - kuće
+  - kući
+  - kuću
+  education:
+  - obrazovanje
+  - obrazovanja
+  - nastava
+  - nastave
+  - školovanje
+  - školovanja
+  - nastavni plan
+  - nastavni planovi
+  - stipendija
+  - stipendije
+  educational_institution:
+  - škola
+  - škole
+  - školi
+  - školu
+  - školom
+  - sveučilište
+  - sveučilišta
+  - sveučilištu
+  - učilište
+  - učilišta
+  - gimnazija
+  - gimnazije
+  educational_actor:
+  - student
+  - studenta
+  - studenti
+  - studenata
+  - učenik
+  - učenika
+  - učenici
+  - učitelj
+  - učitelja
+  - učitelji
+  - nastavnik
+  - nastavnika
+  cultural_activity:
+  - kulturna djelatnost
+  - kulturne djelatnosti
+  - kazališna predstava
+  - kazališne predstave
+  - koncert
+  - koncerti
+  - izložba
+  - izložbe
+  publishing:
+  - izdavaštvo
+  - izdavaštva
+  - tiskanje knjiga
+  - knjižarstvo
+  - izdavanje novina
+  censorship:
+  - cenzura
+  - cenzure
+  - cenzura tiska
+  - kazališna cenzura
+  cultural_institution:
+  - knjižnica
+  - knjižnice
+  - knjižnici
+  - knjižnicu
+  - biblioteka
+  - biblioteke
+  - muzej
+  - muzeja
+  - muzeji
+  - kazalište
+  - kazališta
+  - kazalištu
+  - čitaonica
+  - čitaonice
+  religious_practice:
+  - bogoslužje
+  - bogoslužja
+  - vjerski obred
+  - vjerski obredi
+  - krštenje
+  - krštenja
+  - vjerska procesija
+  - vjerske procesije
+  church_administration:
+  - crkvena uprava
+  - crkvene uprave
+  - župna uprava
+  - župne uprave
+  - crkvene financije
+  - župne matice
+  - matične knjige župe
+  religious_institution:
+  - crkva
+  - crkve
+  - crkvi
+  - crkvu
+  - samostan
+  - samostana
+  - sinagoga
+  - sinagoge
+  - džamija
+  - džamije
+  religious_actor:
+  - svećenik
+  - svećenika
+  - svećenici
+  - rabin
+  - rabina
+  - imam
+  - imama
+  - biskup
+  - biskupa
+  institution_operation:
+  - otvaranje
+  - otvaranja
+  - otvaranju
+  - otvaranju nove
+  - osnivanje
+  - osnivanja
+  - izgradnja
+  - izgradnje
+  - gradnja
+  - gradnje
+  - popravak
+  - popravka
+  - obnova
+  - obnove
+  - održavanje
+  - održavanja
+  - financiranje
+  - financiranja
+  residence_rights:
+  - pravo boravka
+  - prava boravka
+  port_dues:
+  - lučke pristojbe
+  - lučkih pristojbi
+  staff_appointment:
+  - imenovanje
+  - imenovanja
+  detained_person:
+  - zatvorenik
+  - zatvorenika
+  - zatvorenici
+document_types:
+  correspondence:
+  - korespondencija
+  - dopis
+  - dopisi
+  - pismo
+  - pisma
+  - dopisivanje
+  reports:
+  - izvješće
+  - izvješća
+  - izvještaj
+  - izvještaji
+  instructions:
+  - uputa
+  - upute
+  - naputak
+  - naputci
+  circulars:
+  - okružnica
+  - okružnice
+  - cirkular
+  petitions:
+  - molba
+  - molbe
+  - zamolba
+  - zamolbe
+  - zahtjev
+  - zahtjevi
+  statements:
+  - iskaz
+  - iskazi
+  - godišnje izvješće
+  - godišnja izvješća
+  decrees:
+  - uredba
+  - uredbe
+  - naredba
+  - naredbe
+  memoranda:
+  - memorandum
+  - memorandumi
+  - bilješka
+  - bilješke
+  lists:
+  - popis
+  - popisi
+  - registar
+  - registri
+  minutes:
+  - zapisnik
+  - zapisnici
+  - zapisnika
+  certificates:
+  - potvrda
+  - potvrde
+  - svjedodžba
+  - svjedodžbe
+  - putovnica
+  - putovnice
+  plans:
+  - plan
+  - planovi
+  - projekt
+  - projekti
+  - troškovnik
+  - troškovnici
+  complaints:
+  - pritužba
+  - pritužbe
+  - žalba
+  - žalbe
+  - prijava
+  - prijave
+  acts:
+  - akt
+  - akti
+  - odluka
+  - odluke
+  notifications:
+  - obavijest
+  - obavijesti
+  - telegram
+  - telegrami
+terminology:
+  burgher: []
+  merchant:
+  - trgovac
+  - trgovci
+  - trgovca
+  peasant:
+  - seljak
+  - seljaci
+  - seljaka
+  subject:
+  - podanik
+  - podanici
+  - podanika
+  honorary:
+  - počasni građanin
+  - počasni građani
+  serf:
+  - kmet
+  - kmetovi
+  - kmeta
+  worker:
+  - radnik
+  - radnici
+  - radnika
+  passport:
+  - putovnica
+  - putovnice
+  supervision:
+  - nadzor
+  - nadzora
+  police_supervision:
+  - policijski nadzor
+  - policijskog nadzora
+  search:
+  - potraga
+  - potrage
+  - potraga za
+  expulsion:
+  - protjerivanje
+  - protjerivanja
+  - deportacija
+  - deportacije
+  exile:
+  - progonstvo
+  - progonstva
+  - prognanik
+  - prognanici
+  political:
+  - politički
+  - politička
+  - političke
+  - političkog
+  revolutionary:
+  - revolucionarni
+  - revolucionarna
+  - revolucionar
+  propaganda:
+  - propaganda
+  - propagande
+  unreliable:
+  - politički nepouzdan
+  - politička nepouzdanost
+  unrest:
+  - nemiri
+  - neredi
+  censorship:
+  - cenzura
+  - cenzure
+  dissenter: []
+  strike:
+  - štrajk
+  - štrajkovi
+  - štrajka
+place_aliases:
+  Миколаїв:
+  - Mikolajiv
+  - Mikolajivu
+  Севастополь:
+  - Sevastopolj
+  - Sevastopolju
+  Одеса:
+  - Odesa
+  - Odesi
+  - Odesu
+  - Odessa
+  Херсон:
+  - Herson
+  - Hersonu
+  Київ:
+  - Kijev
+  - Kijevu
+  - Kijeva
+  Москва:
+  - Moskva
+  - Moskvi
+  - Moskvu
+  Санкт-Петербург:
+  - Sankt Peterburg
+  - Sankt Peterburgu
+  Варшава:
+  - Varšava
+  - Varšavi
+  - Varšavu
+  Краків:
+  - Krakov
+  - Krakovu
+  Відень:
+  - Beč
+  - Beču
+  - Beča
+  Берлін:
+  - Berlin
+  - Berlinu
+  - Berlina
+  Париж:
+  - Pariz
+  - Parizu
+  - Pariza
+  Лондон:
+  - London
+  - Londonu
+  - Londona
+  Прага:
+  - Prag
+  - Pragu
+  - Praga
+  Женева:
+  - Ženeva
+  - Ženevi
+  - Ženevu
+  Стамбул (Константинополь):
+  - Istanbul
+  - Istanbulu
+  - Carigrad
+  - Carigradu
+place_prefixes:
+- grad
+- grada
+- gradu
+- selo
+- sela
+- selu
+- luka
+- luke
+- luci
+preferred_labels:
+  political_activity: politika
+  political_surveillance: politički nadzor
+  political_unrest: ustanak
+  public_administration: javna uprava
+  local_government: lokalna samouprava
+  administrative_appointment: imenovanje službenika
+  administrative_actor: guverner
+  legal_proceedings: kazneni postupak
+  policing: policijska istraga
+  arrest_and_detention: uhićenje
+  crime: krađa
+  property_law: imovinska prava
+  legal_actor: policija
+  armed_forces: oružane snage
+  naval_affairs: pomorske operacije
+  military_operations: vojne operacije
+  military_actor: vojnik
+  economic_activity: gospodarstvo
+  taxation: porez
+  finance: financije
+  economic_assets: roba
+  agriculture: poljoprivreda
+  economic_actor: trgovac
+  demography: demografija
+  migration: migracija
+  social_assistance: socijalna pomoć
+  labour: zapošljavanje
+  personal_documentation: osobni dosje
+  healthcare: zdravstvena zaštita
+  epidemic: epidemija
+  public_health: javno zdravstvo
+  medical_institution: bolnica
+  medical_actor: liječnik
+  urban_planning: urbanizam
+  water_and_sanitation: vodoopskrba
+  public_works: javni radovi
+  building: zgrada
+  education: obrazovanje
+  educational_institution: škola
+  educational_actor: student
+  cultural_activity: kulturna djelatnost
+  publishing: izdavaštvo
+  censorship: cenzura
+  cultural_institution: knjižnica
+  religious_practice: bogoslužje
+  church_administration: crkvena uprava
+  religious_institution: crkva
+  religious_actor: svećenik
+  institution_operation: otvaranje
+  residence_rights: pravo boravka
+  port_dues: lučke pristojbe
+  staff_appointment: imenovanje
+  detained_person: zatvorenik

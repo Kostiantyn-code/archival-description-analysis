@@ -11,6 +11,7 @@ from urllib.parse import quote
 from models import Issue, Record
 from visualization import Visualization
 from report_localization import Report
+from language_packs import LanguageRegistry
 
 
 CHARTS = {
@@ -81,6 +82,7 @@ def write_html_report(
     issues: list[Issue], script_version: str, dictionary_version: str,
     macroblock_labels: dict[str, str],
     visual: Visualization | None = None,
+    language_registry: LanguageRegistry | None = None,
 ) -> Path:
     """Write one report per workbook; combined is not added to fond totals."""
     visual = visual or Visualization()
@@ -115,11 +117,9 @@ def write_html_report(
         cards = "".join(f'<article class="card"><strong>{_escape(value)}</strong><span>{label}</span></article>'
                         for value, label in ((len(active), tr('справ в аналізі')),
                                              (len(sheets), tr('описів')), (year_range, tr('крайні роки справ'))))
-        unsupported = sorted({r.language for r in records if r.language not in {"uk", "ru"}})
-        if unsupported:
-            cards += '<p class="note">' + _escape(tr(
-                'Для мов {0} тематичні словники відсутні. Класифікацію пропущено; нульове покриття не характеризує зміст документів.',
-                ', '.join(unsupported))) + '</p>'
+        registry = language_registry or LanguageRegistry.load()
+        for message, languages in registry.notices({r.language for r in records}):
+            cards += '<p class="note">' + _escape(tr(message, languages)) + '</p>'
         quality = table([tr('Показник'), tr('Кількість')], [
             (tr('Помилки'), counts["ERROR"]), (tr('Попередження'), counts["WARNING"]),
             (tr('Порожні крайні дати'), sum(not r.dates_raw for r in active)),

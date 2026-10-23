@@ -18,3 +18,10 @@ visualization:
   language: uk
   bilingual_labels: false
   label_overrides: {}
+
+# Мова аналізу незалежна від мови оформлення звіту.
+analysis:
+  language: auto
+  sheet_languages: {}
+  # aligned: спільні EN/UK/HR/IT поняття; legacy_uk: попередні українські правила.
+  vocabulary_mode: aligned

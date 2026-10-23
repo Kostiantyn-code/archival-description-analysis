@@ -2,11 +2,29 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from contextvars import ContextVar
 from functools import lru_cache
 from typing import Any
 
 MATCH_LANGUAGE = ContextVar("match_language", default="uk")
+MATCHING_PROFILES = {"uk": "legacy_uk", "ru": "legacy_ru", "en": "unicode_exact", "hr": "unicode_exact", "it": "unicode_exact"}
+DETECTION_TERMS = {}
+
+
+def configure_matching_profiles(profiles: dict[str, str], detection_terms: dict[str, list[str]] | None = None) -> None:
+    MATCHING_PROFILES.clear()
+    MATCHING_PROFILES.update(profiles)
+    if detection_terms is not None:
+        DETECTION_TERMS.clear()
+        DETECTION_TERMS.update({code: set(terms) for code, terms in detection_terms.items()})
+    cached_item_tokens.cache_clear()
+
+
+def unicode_tokens(text: str) -> list[str]:
+    # Split punctuation, apostrophes and hyphens. NFC preserves č/ć/š/ž/đ and
+    # Italian accents; no accent stripping or speculative suffix truncation.
+    return re.findall(r"[^\W_]+", unicodedata.normalize("NFC", text).casefold())
 
 
 WORD_RE = re.compile(
@@ -63,6 +81,8 @@ def normalize_text(text: str) -> str:
 
 
 def tokenize(text: str) -> list[str]:
+    if MATCHING_PROFILES.get(MATCH_LANGUAGE.get()) == "unicode_exact":
+        return unicode_tokens(text)
     normalized = normalize_text(text)
     # У джерелі складні слова інколи набрано з пробілами біля дефіса:
     # «військово- морський». Для зіставлення це те саме складне слово.
@@ -151,6 +171,11 @@ RU_IRREGULAR = {
 
 
 def light_stem_word(word: str) -> str:
+    profile = MATCHING_PROFILES.get(MATCH_LANGUAGE.get())
+    if profile == "unicode_exact":
+        return unicodedata.normalize("NFC", word).casefold()
+    if profile is None:
+        raise ValueError(f"No matching profile for language: {MATCH_LANGUAGE.get()}")
     if MATCH_LANGUAGE.get() == "ru":
         return russian_stem_word(word)
     return ukrainian_stem_word(word)
@@ -303,6 +328,11 @@ def detect_title_language(title: str) -> str:
         return "uk"
     if ru >= 2 and ru > uk * 2:
         return "ru"
+    words = set(unicode_tokens(title))
+    markers = DETECTION_TERMS
+    ranked = sorted(((len(words & vocabulary), code) for code, vocabulary in markers.items()), reverse=True)
+    if ranked and ranked[0][0] >= 2 and ranked[0][0] >= (ranked[1][0] if len(ranked) > 1 else 0) + 2:
+        return ranked[0][1]
     return "undetermined"
 
 

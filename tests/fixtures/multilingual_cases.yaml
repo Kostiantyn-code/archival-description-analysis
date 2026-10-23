@@ -1,0 +1,335 @@
+- id: school_opening
+  categories:
+  - education
+  titles:
+    en: Opening a school
+    uk: Відкриття школи
+    hr: Otvaranje škole
+    it: Apertura della scuola
+- id: hospital_repair
+  categories:
+  - healthcare
+  titles:
+    en: Repair of a hospital
+    uk: Ремонт лікарні
+    hr: Popravak bolnice
+    it: Riparazione dell’ospedale
+- id: teacher_arrest
+  categories:
+  - law_and_police
+  titles:
+    en: Arrest of a teacher
+    uk: Арешт учителя
+    hr: Uhićenje učitelja
+    it: Arresto di un insegnante
+- id: doctor_arrest
+  categories:
+  - law_and_police
+  titles:
+    en: Arrest of a physician
+    uk: Арешт лікаря
+    hr: Uhićenje liječnika
+    it: Arresto del medico
+- id: doctor_appointment
+  categories:
+  - healthcare
+  titles:
+    en: Appointment of a physician
+    uk: Призначення лікаря
+    hr: Imenovanje liječnika
+    it: Nomina del medico
+- id: political_watch
+  categories:
+  - politics
+  titles:
+    en: Political surveillance
+    uk: Політичний нагляд
+    hr: Politički nadzor
+    it: Sorveglianza politica
+- id: police_watch
+  categories:
+  - law_and_police
+  titles:
+    en: Police surveillance of a merchant
+    uk: Поліцейський нагляд за купцем
+    hr: Policijski nadzor trgovca
+    it: Sorveglianza di polizia di un mercante
+- id: property_rights
+  categories:
+  - law_and_police
+  titles:
+    en: Property rights
+    uk: Майнові права
+    hr: Imovinska prava
+    it: Diritti patrimoniali
+- id: household_goods
+  categories:
+  - economy
+  titles:
+    en: Household goods and furniture
+    uk: Домашнє майно і меблі
+    hr: Pokućstvo i namještaj
+    it: Beni domestici e mobili
+- id: theft_of_goods
+  categories:
+  - law_and_police
+  - economy
+  titles:
+    en: Theft of household goods
+    uk: Крадіжка домашнього майна
+    hr: Krađa pokućstva
+    it: Furto di beni domestici
+- id: public_admin
+  categories:
+  - public_administration
+  titles:
+    en: Public administration
+    uk: Державне управління
+    hr: Javna uprava
+    it: Pubblica amministrazione
+- id: local_admin
+  categories:
+  - public_administration
+  titles:
+    en: Local government
+    uk: Місцеве самоврядування
+    hr: Lokalna samouprava
+    it: Governo locale
+- id: official_appointment
+  categories:
+  - public_administration
+  titles:
+    en: Appointment of officials
+    uk: Призначення чиновників
+    hr: Imenovanje službenika
+    it: Nomina dei funzionari
+- id: military_service
+  categories:
+  - military_affairs
+  titles:
+    en: Military service
+    uk: Військова служба
+    hr: Vojna služba
+    it: Servizio militare
+- id: naval_fleet
+  categories:
+  - military_affairs
+  titles:
+    en: Naval fleet
+    uk: Військово-морський флот
+    hr: Ratna mornarica
+    it: Marina militare
+- id: taxation
+  categories:
+  - economy
+  titles:
+    en: Tax collection
+    uk: Стягнення податків
+    hr: Naplata poreza
+    it: Riscossione delle imposte
+- id: port_dues
+  categories:
+  - economy
+  titles:
+    en: Review of port dues
+    uk: Перегляд портових зборів
+    hr: Revizija lučkih pristojbi
+    it: Revisione dei diritti portuali
+- id: census
+  categories:
+  - population_and_society
+  titles:
+    en: Population census
+    uk: Перепис населення
+    hr: Popis stanovništva
+    it: Censimento della popolazione
+- id: residence
+  categories:
+  - population_and_society
+  titles:
+    en: Right of residence
+    uk: Право на проживання
+    hr: Pravo boravka
+    it: Diritto di soggiorno
+- id: refugees
+  categories:
+  - population_and_society
+  titles:
+    en: Refugees
+    uk: Біженці
+    hr: Izbjeglice
+    it: Rifugiati
+- id: assistance
+  categories:
+  - population_and_society
+  titles:
+    en: Social assistance
+    uk: Соціальна допомога
+    hr: Socijalna pomoć
+    it: Assistenza sociale
+- id: forced_labour
+  categories:
+  - population_and_society
+  titles:
+    en: Forced labour
+    uk: Примусова праця
+    hr: Prisilni rad
+    it: Lavoro forzato
+- id: personal_files
+  categories:
+  - personal_files
+  titles:
+    en: Personal files
+    uk: Особові справи
+    hr: Osobni dosjei
+    it: Fascicoli personali
+- id: pupil_lists
+  categories:
+  - personal_files
+  - education
+  titles:
+    en: List of pupils
+    uk: Список учнів
+    hr: Popis učenika
+    it: Elenco degli alunni
+- id: prisoner_files
+  categories:
+  - personal_files
+  - law_and_police
+  titles:
+    en: Personal files of prisoners
+    uk: Особові справи ув’язнених
+    hr: Osobni dosjei zatvorenika
+    it: Fascicoli personali dei detenuti
+- id: healthcare
+  categories:
+  - healthcare
+  titles:
+    en: Medical care
+    uk: Медична допомога
+    hr: Medicinska skrb
+    it: Assistenza medica
+- id: vaccination
+  categories:
+  - healthcare
+  titles:
+    en: Vaccination
+    uk: Вакцинація
+    hr: Cijepljenje
+    it: Vaccinazione
+- id: quarantine_rules
+  categories:
+  - healthcare
+  titles:
+    en: Quarantine regulations
+    uk: Карантинні правила
+    hr: Karantenski propisi
+    it: Regolamenti di quarantena
+- id: urban_planning
+  categories:
+  - urban_infrastructure
+  titles:
+    en: Urban planning
+    uk: Містобудування
+    hr: Urbanističko planiranje
+    it: Pianificazione urbana
+- id: water_supply
+  categories:
+  - urban_infrastructure
+  titles:
+    en: Water supply
+    uk: Водопостачання
+    hr: Vodoopskrba
+    it: Approvvigionamento idrico
+- id: street_lighting
+  categories:
+  - urban_infrastructure
+  titles:
+    en: Street lighting
+    uk: Вуличне освітлення
+    hr: Ulična rasvjeta
+    it: Illuminazione stradale
+- id: road_construction
+  categories:
+  - urban_infrastructure
+  titles:
+    en: Road construction
+    uk: Будівництво доріг
+    hr: Gradnja cesta
+    it: Costruzione di strade
+- id: education
+  categories:
+  - education
+  titles:
+    en: Education
+    uk: Освіта
+    hr: Obrazovanje
+    it: Istruzione
+- id: publishing
+  categories:
+  - culture
+  titles:
+    en: Publishing
+    uk: Видавнича справа
+    hr: Izdavaštvo
+    it: Editoria
+- id: censorship
+  categories:
+  - culture
+  titles:
+    en: Press censorship
+    uk: Цензура преси
+    hr: Cenzura tiska
+    it: Censura della stampa
+- id: worship
+  categories:
+  - religion
+  titles:
+    en: Religious service
+    uk: Богослужіння
+    hr: Bogoslužje
+    it: Funzione religiosa
+- id: church_finance
+  categories:
+  - economy
+  - religion
+  titles:
+    en: Church finances
+    uk: Церковні фінанси
+    hr: Crkvene financije
+    it: Finanze ecclesiastiche
+- id: teacher_context
+  categories: []
+  titles:
+    en: Teacher
+    uk: Учитель
+    hr: Učitelj
+    it: Insegnante
+- id: hospital_context
+  categories: []
+  titles:
+    en: Hospital
+    uk: Лікарня
+    hr: Bolnica
+    it: Ospedale
+- id: building_context
+  categories: []
+  titles:
+    en: Building
+    uk: Будівля
+    hr: Zgrada
+    it: Edificio
+- id: appointment_context
+  categories: []
+  titles:
+    en: Appointment
+    uk: Призначення
+    hr: Imenovanje
+    it: Nomina
+- id: closure_context
+  categories: []
+  titles:
+    en: Closure of a school
+    uk: Закриття школи
+    hr: Zatvaranje škole
+    it: Chiusura della scuola

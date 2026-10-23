@@ -1,0 +1,24 @@
+{
+  "input_file": "HR-DAST-208_MNO-Split_input.xlsx",
+  "input_sha256": "aea5cd96f7ec8e15a81e97bd28993bbccd8a555157c6b73810df063cbb74e20b",
+  "report_language": "en",
+  "thematic_exports_enabled": false,
+  "static_charts_enabled": false,
+  "language": "hr",
+  "language_source": "sheet_declared",
+  "dictionary_version": "1.0-reviewed-draft",
+  "status": "completed",
+  "summary": {
+    "source": "combined",
+    "titles": 10469,
+    "subject": 8314,
+    "context_only": 965,
+    "no_evidence": 1190,
+    "missing_dates": 3,
+    "missing_pages": 10469
+  },
+  "interpretation": "End-to-end execution check on the full imported Croatian corpus. Coverage counts are not accuracy estimates. The source consists of war-damage descriptors, not uniformly full archival file titles.",
+  "source_titles_preserved_after_existing_cell_trim": true,
+  "titles_with_outer_whitespace_trimmed": 272,
+  "unsupported_language_flags": 0
+}

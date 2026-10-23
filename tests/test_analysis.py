@@ -39,7 +39,7 @@ class AnalysisTests(unittest.TestCase):
                 f.configure_workbook_sources(__import__('openpyxl'))
             finally:
                 f.INPUT_FILE = previous
-        cls.uk, cls.amb, cls.mac, _ = f.load_dictionaries(yaml)
+        cls.uk, cls.amb, cls.mac, _ = f.load_dictionaries(yaml, legacy=True)
         ru, amb, *_ = f.load_dictionaries(yaml, 'ru')
         f.LANGUAGE_CATEGORIES.update(uk=cls.uk, ru=ru)
         f.LANGUAGE_AMBIGUITIES.update(uk=cls.amb, ru=amb)
@@ -144,7 +144,7 @@ class AnalysisTests(unittest.TestCase):
         for language, categories in f.LANGUAGE_CATEGORIES.items():
             for c in categories:
                 self.assertGreaterEqual(c.minimum_score, 1)
-                self.assertTrue(c.strong_terms or c.strong_phrases or c.context_rules)
+                self.assertTrue(c.strong_terms or c.strong_phrases or c.context_rules or c.concepts)
 
     def test_healthcare_is_configured_bilingually(self):
         healthcare_uk = next(c for c in f.LANGUAGE_CATEGORIES['uk'] if c.id == 'healthcare')
@@ -277,7 +277,7 @@ class AnalysisTests(unittest.TestCase):
                     yaml.safe_dump(config, allow_unicode=True), encoding='utf-8'
                 )
                 f.CONFIG_DIR = directory
-                categories, *_ = f.load_dictionaries(yaml, 'uk')
+                categories, *_ = f.load_dictionaries(yaml, 'uk', legacy=True)
                 self.assertEqual([category.id for category in categories], ['culture'])
         finally:
             f.CONFIG_DIR = old_config_dir
