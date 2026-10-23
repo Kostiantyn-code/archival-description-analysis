@@ -14,6 +14,7 @@ from typing import Callable
 from report_utils import json_for_script, write_csv
 from models import Record
 from visualization import Visualization
+from language_packs import alias_hits
 
 
 RULES_VERSION = "0.1-draft"
@@ -54,8 +55,10 @@ SUMMARY_FIELDS = ("scope", "description", "decade", "term_id", "term", "group",
                   "titles_total", "titles_with_term", "per_1000_titles")
 
 
-def match_terms(title: str) -> list[tuple[str, str]]:
+def match_terms(title: str, language: str = "uk") -> list[tuple[str, str]]:
     """Return one example per marker, even if a word repeats in the title."""
+    if language not in {"uk", "ru"}:
+        return list(alias_hits(title, language, "terminology").items())
     return [(term_id, hit.group(0)) for term_id, _, _, pattern in TERMS
             if (hit := pattern.search(title))]
 
@@ -101,7 +104,7 @@ def write_terminology_report(
         if decade is not None:
             denominators["all", decade] += 1
             denominators[record.sheet_name, decade] += 1
-        for term_id, matched_form in match_terms(record.title_raw):
+        for term_id, matched_form in match_terms(record.title_raw, record.language):
             term = next(item for item in TERMS if item[0] == term_id)
             index.append({
                 "record_uid": record.record_uid,

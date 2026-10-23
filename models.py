@@ -34,6 +34,8 @@ class Category:
     exclude_phrases: list[str]
     review_terms: list[str]
     export_filename: str = ""
+    concepts: list[dict[str, Any]] = field(default_factory=list)
+    concept_rules: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass

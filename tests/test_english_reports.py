@@ -85,10 +85,10 @@ class EnglishReportTests(unittest.TestCase):
                 for key, value in old.items():
                     setattr(f, key, value)
 
-    def test_declared_croatian_does_not_fall_back_to_ukrainian(self):
+    def test_declared_unsupported_language_does_not_fall_back_to_ukrainian(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "croatian.xlsx"
-            make_input(path, "hr")
+            make_input(path, "zz")
             old = f.INPUT_FILE, f.SOURCE_CONFIG, f.SHEET_NAMES, f.HEADER_ROWS_BY_SHEET
             try:
                 f.INPUT_FILE = path
@@ -96,8 +96,8 @@ class EnglishReportTests(unittest.TestCase):
                 records, _, _ = f.read_records(openpyxl)
                 with contextlib.redirect_stdout(io.StringIO()):
                     f.classify_records(records, [], [], [])
-                self.assertTrue(all(r.language == "hr" and r.language_source == "sheet_declared" for r in records))
-                self.assertTrue(all(not r.categories and "unsupported_language: hr" in r.review_flags for r in records))
+                self.assertTrue(all(r.language == "zz" and r.language_source == "sheet_declared" for r in records))
+                self.assertTrue(all(not r.categories and "unsupported_language: zz" in r.review_flags for r in records))
             finally:
                 f.INPUT_FILE, f.SOURCE_CONFIG, f.SHEET_NAMES, f.HEADER_ROWS_BY_SHEET = old
 

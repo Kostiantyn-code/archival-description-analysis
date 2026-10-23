@@ -11,6 +11,7 @@ from functools import lru_cache
 from pathlib import Path
 
 import yaml
+from language_packs import alias_hits, pack_content
 
 
 GAZETTEER = Path(__file__).resolve().parent / "config" / "geography.yaml"
@@ -65,10 +66,13 @@ def load_places() -> tuple[str, tuple[Place, ...]]:
     return str(config.get("version", "unknown")), tuple(places)
 
 
-def find_places(title: str, places: tuple[Place, ...] | None = None) -> list[tuple[Place, str]]:
+def find_places(title: str, places: tuple[Place, ...] | None = None, language: str = "uk") -> list[tuple[Place, str]]:
     """Return at most one mention per settlement per title."""
     if places is None:
         places = load_places()[1]
+    if language not in {"uk", "ru"}:
+        hits = alias_hits(title, language, "place_aliases")
+        return [(place, hits[place.name]) for place in places if place.name in hits]
     matches = []
     for place in places:
         acceptable = []
@@ -89,11 +93,22 @@ def find_places(title: str, places: tuple[Place, ...] | None = None) -> list[tup
     return matches
 
 
-def unknown_candidates(title: str, known: list[tuple[Place, str]]) -> list[str]:
+def unknown_candidates(title: str, known: list[tuple[Place, str]], language: str = "uk") -> list[str]:
     """Explicit city/village/port prefixes whose names need manual review."""
     seen = set()
     result = []
     names = {expression.casefold() for _, expression in known}
+    if language not in {"uk", "ru"}:
+        prefixes = pack_content(language).get("place_prefixes", [])
+        if not prefixes:
+            return []
+        pattern = re.compile(r"(?<!\w)(?:" + "|".join(re.escape(x) for x in prefixes) + r")\s+([^\W\d_]+(?:-[^\W\d_]+)*)", re.I)
+        for hit in pattern.finditer(title):
+            candidate = hit.group(1)
+            if candidate[0].isupper() and candidate.casefold() not in names and candidate.casefold() not in seen and not find_places(candidate, language=language):
+                result.append(candidate)
+                seen.add(candidate.casefold())
+        return result
     for hit in UNKNOWN_CONTEXT.finditer(title):
         candidate = hit.group(1)
         if candidate.casefold() in names or candidate.casefold() in seen:

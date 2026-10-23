@@ -17,7 +17,7 @@ class PersonnelClassificationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         f.configure_analysis(yaml)
-        cls.uk, cls.amb_uk, cls.blocks, _ = f.load_dictionaries(yaml)
+        cls.uk, cls.amb_uk, cls.blocks, _ = f.load_dictionaries(yaml, legacy=True)
         cls.ru, cls.amb_ru, _, _ = f.load_dictionaries(yaml, "ru")
         f.LANGUAGE_CATEGORIES.update(uk=cls.uk, ru=cls.ru)
         f.LANGUAGE_AMBIGUITIES.update(uk=cls.amb_uk, ru=cls.amb_ru)

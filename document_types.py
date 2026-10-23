@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from language_packs import alias_hits
 
 
 DOCUMENT_TYPE_RULES_VERSION = "0.1-draft"
@@ -60,9 +61,12 @@ DOCUMENT_TYPES = tuple(
 )
 
 
-def match_document_types(title: str) -> list[tuple[DocumentType, str]]:
+def match_document_types(title: str, language: str = "uk") -> list[tuple[DocumentType, str]]:
     """Return each mentioned type once, with an example matched expression."""
     matches = []
+    if language not in {"uk", "ru"}:
+        hits = alias_hits(title, language, "document_types")
+        return [(document_type, hits[document_type.id]) for document_type in DOCUMENT_TYPES if document_type.id in hits]
     for document_type in DOCUMENT_TYPES:
         match = document_type.pattern.search(title)
         if match:

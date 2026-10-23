@@ -27,6 +27,7 @@ from html_report import write_html_report
 from report_utils import write_csv
 from visualization import Visualization, CATALOG as VISUALIZATION_CATALOG
 from report_localization import Report, CATALOG as REPORT_CATALOG
+from language_packs import LanguageRegistry, REGISTRY as LANGUAGE_REGISTRY, evaluate_concepts, pack_content, lexical_patterns, structural_patterns, personal_section_matches
 from text_matching import (
     MATCH_LANGUAGE,
     YEAR_HEADING_RE,
@@ -41,10 +42,11 @@ from text_matching import (
     mask_item,
     normalize_case_id,
     detect_title_language,
+    configure_matching_profiles,
 )
 
 BASE_DIR = Path(__file__).resolve().parent
-SCRIPT_VERSION = "0.14-dev"
+SCRIPT_VERSION = "0.15-dev"
 CONFIG_DIR = BASE_DIR / "config"
 INPUT_DIR = BASE_DIR / "input"
 INPUT_FILE = INPUT_DIR / "input.xlsx"
@@ -75,6 +77,15 @@ LETTER_HEADING_RE = re.compile(r'^[«"“]?\s*[А-ЯЁІЇЄҐA-Z]\s*[»"”]?$'
 
 def tr(source: str, *values: str) -> str:
     return Report(Visualization.from_config(ANALYSIS_CONFIG)).text(source, *values)
+
+
+def analysis_languages() -> LanguageRegistry:
+    registry = LanguageRegistry.load(LANGUAGE_REGISTRY)
+    if ANALYSIS_CONFIG.get("analysis", {}).get("vocabulary_mode") == "legacy_uk":
+        registry.languages["uk"].update(vocabulary="legacy", version="0.8-draft", validation_status="legacy_unvalidated")
+    configure_matching_profiles({code: pack["matching"] for code, pack in registry.languages.items()},
+                                {code: pack.get("detection_terms", []) for code, pack in registry.languages.items() if pack.get("detection_terms")})
+    return registry
 
 
 def load_dependencies():
@@ -122,7 +133,24 @@ def configure_analysis(yaml_module) -> None:
     path = config_path("analysis.yaml")
     config = safe_load_yaml(path, yaml_module)
     Visualization.from_config(config)  # Validate presentation settings before analysis.
+    options = config.get("analysis", {})
+    if not isinstance(options, dict):
+        raise ValueError("analysis: expected a mapping")
     ANALYSIS_CONFIG = config
+    registry = analysis_languages()
+    LANGUAGE_CATEGORIES.clear()
+    LANGUAGE_AMBIGUITIES.clear()
+    pack_content.cache_clear()
+    lexical_patterns.cache_clear()
+    structural_patterns.cache_clear()
+    if options.get("vocabulary_mode", "aligned") not in {"aligned", "legacy_uk"}:
+        raise ValueError("analysis.vocabulary_mode: expected aligned or legacy_uk")
+    configured_language = options.get("language", "auto")
+    if configured_language not in {"auto", *registry.languages}:
+        raise ValueError(f"analysis.language: unknown language {configured_language}")
+    overrides = options.get("sheet_languages", {})
+    if not isinstance(overrides, dict) or any(not isinstance(key, str) or code not in registry.languages for key, code in overrides.items()):
+        raise ValueError("analysis.sheet_languages: expected worksheet names mapped to registered language codes")
 
     input_name = str(config.get("input_dir", "input"))
     output_name = str(config.get("output_root", "outputs"))
@@ -170,6 +198,7 @@ def workbook_folder(path: Path, occupied: set[str]) -> str:
 def configure_workbook_sources(openpyxl_module) -> None:
     """Read the authoritative Archive/Fond/Inventory rows on every sheet."""
     global SOURCE_CONFIG, SHEET_NAMES, HEADER_ROWS_BY_SHEET
+    analysis_languages()
     workbook = openpyxl_module.load_workbook(INPUT_FILE, read_only=True, data_only=True)
     try:
         sources = {}
@@ -181,8 +210,8 @@ def configure_workbook_sources(openpyxl_module) -> None:
             if len(rows) < 4:
                 raise ValueError(f"{INPUT_FILE.name}, {sheet.title}: потрібні три рядки метаданих і шапка у рядку 4")
             fields = []
-            for row_number, label in enumerate(("Архів", "Фонд", "Опис"), start=1):
-                if normalize_text(clean_cell(rows[row_number - 1][0])) != normalize_text(label):
+            for row_number, (label, aliases) in enumerate((("Архів", {"архів", "archive"}), ("Фонд", {"фонд", "fond", "fonds"}), ("Опис", {"опис", "inventory"})), start=1):
+                if normalize_text(clean_cell(rows[row_number - 1][0])) not in aliases:
                     raise ValueError(f"{INPUT_FILE.name}, {sheet.title}, A{row_number}: очікується «{label}»")
                 value = clean_cell(rows[row_number - 1][1])
                 if not value:
@@ -193,7 +222,8 @@ def configure_workbook_sources(openpyxl_module) -> None:
             if inventory_key in inventory_keys:
                 raise ValueError(f"{INPUT_FILE.name}, {sheet.title}: цей архів, фонд і опис вже є на іншому аркуші")
             inventory_keys.add(inventory_key)
-            if "№" not in clean_cell(rows[3][0]):
+            identifier_header = clean_cell(rows[3][0])
+            if "№" not in identifier_header and identifier_header.casefold().rstrip('.') not in {"no", "number", "id", "#"}:
                 raise ValueError(f"{INPUT_FILE.name}, {sheet.title}, A4: очікується заголовок «№»")
             key = (archive.casefold(), fond.casefold())
             if key not in source_keys:
@@ -203,7 +233,7 @@ def configure_workbook_sources(openpyxl_module) -> None:
             language_counts = Counter()
             for row in sheet.iter_rows(min_row=5, max_row=104, min_col=2, max_col=2, values_only=True):
                 title_language = detect_title_language(clean_cell(row[0]))
-                if title_language in {"uk", "ru"}:
+                if title_language not in {"undetermined", "mixed"}:
                     language_counts[title_language] += 2
                 elif title_language == "undetermined":
                     tokens = tokenize(clean_cell(row[0]))
@@ -212,16 +242,32 @@ def configure_workbook_sources(openpyxl_module) -> None:
                     elif any(token in {"справа", "відомості", "щодо"} for token in tokens):
                         language_counts["uk"] += 1
             language = "ru" if language_counts["ru"] > language_counts["uk"] else "uk"
+            if not sum(language_counts.values()):
+                sample = ' '.join(clean_cell(row[0]) for row in sheet.iter_rows(min_row=5, max_row=104, min_col=2, max_col=2, values_only=True))
+                if re.search(r'[A-Za-zÀ-ž]', sample) and not re.search(r'[А-Яа-яІіЇїЄєҐґЁё]', sample):
+                    language = "undetermined"
+            latin = [(count, code) for code, count in language_counts.items() if code not in {"uk", "ru"}]
+            if latin:
+                best_count, best_language = max(latin)
+                if best_count > max(language_counts["uk"], language_counts["ru"]):
+                    language = best_language
+            options = ANALYSIS_CONFIG.get("analysis", {})
+            configured = options.get("sheet_languages", {}).get(sheet.title, options.get("language", "auto"))
+            language_source = "sheet_inferred"
+            if configured != "auto":
+                language = configured
+                language_source = "config_sheet" if sheet.title in options.get("sheet_languages", {}) else "config_default"
             declared = clean_cell(rows[0][4]).casefold() if clean_cell(rows[0][3]).casefold() == "language" else ""
             if declared:
                 if not re.fullmatch(r"[a-z]{2,3}", declared):
                     raise ValueError(f"{INPUT_FILE.name}, {sheet.title}, E1: invalid language code")
                 language = declared
+                language_source = "sheet_declared"
             header = [normalize_text(clean_cell(value)) for value in rows[3]]
             sources[sheet.title] = {
                 "source_id": source_keys[key], "archive": archive, "fond": fond,
                 "inventory": inventory, "language": language,
-                "language_source": "sheet_declared" if declared else "sheet_inferred",
+                "language_source": language_source,
                 "pages_expected": bool(header[3]),
                 "skip_header_checks": [index for index, value in enumerate(header, 1)
                                        if (index in {4, 5} and not value) or
@@ -252,7 +298,7 @@ def ensure_directories() -> None:
     THEMATIC_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def load_dictionaries(yaml_module, language="uk"):
+def load_dictionaries(yaml_module, language="uk", *, legacy=False):
     index_path = config_path(
         "categories.yaml", DICTIONARIES_DIR / "categories.yaml"
     )
@@ -262,6 +308,13 @@ def load_dictionaries(yaml_module, language="uk"):
         )
 
     index = safe_load_yaml(index_path, yaml_module)
+    registry = analysis_languages()
+    if language not in registry.languages:
+        raise ValueError(f"No analysis language pack registered for: {language}")
+    conceptual = registry.languages[language]["vocabulary"] == "reference" and not legacy
+    if legacy and language not in {"uk", "ru"}:
+        raise ValueError("Legacy dictionaries are available only for uk/ru")
+    compiled = registry.compile(language, index)[0] if conceptual else None
     categories: list[Category] = []
     configured_categories = index.get("categories", [])
     if not isinstance(configured_categories, list):
@@ -288,7 +341,10 @@ def load_dictionaries(yaml_module, language="uk"):
             )
         dictionaries = item.get("dictionaries", {})
         configured_path = dictionaries.get(language) if isinstance(dictionaries, dict) else None
-        if configured_path:
+        if compiled is not None:
+            data = {"id": category_id, "macroblock": item["macroblock"]}
+            category_path = LANGUAGE_REGISTRY
+        elif configured_path:
             category_path = BASE_DIR / str(configured_path)
         else:
             # Сумісність із categories.yaml версій 0.3–0.6.
@@ -297,7 +353,8 @@ def load_dictionaries(yaml_module, language="uk"):
                 / ("ru" if language == "ru" else "")
                 / item["file"]
             )
-        data = safe_load_yaml(category_path, yaml_module)
+        if compiled is None:
+            data = safe_load_yaml(category_path, yaml_module)
         if data.get("id") != item["id"]:
             raise ValueError(f"Ідентифікатор категорії не відповідає індексу: {category_path}")
         for key in CATEGORY_RULE_FIELDS:
@@ -344,15 +401,16 @@ def load_dictionaries(yaml_module, language="uk"):
                 ),
                 **{key: list(data.get(key, [])) for key in CATEGORY_RULE_FIELDS},
                 export_filename=export_filename,
+                **(compiled[category_id] if compiled is not None else {}),
             )
         )
     if not categories:
         raise ValueError("У categories.yaml немає тематичних категорій.")
 
-    ambiguity_path = DICTIONARIES_DIR / ("ru" if language == "ru" else "") / "auxiliary" / "ambiguities.yaml"
+    ambiguity_path = DICTIONARIES_DIR / (language if language != "uk" else "") / "auxiliary" / "ambiguities.yaml"
     ambiguities = (
         safe_load_yaml(ambiguity_path, yaml_module).get("rules", [])
-        if ambiguity_path.exists()
+        if not conceptual and ambiguity_path.exists()
         else []
     )
 
@@ -360,7 +418,7 @@ def load_dictionaries(yaml_module, language="uk"):
         key: value.get("label", key)
         for key, value in index.get("macroblocks", {}).items()
     }
-    dictionary_version = str(index.get("dictionary_version", "невідома"))
+    dictionary_version = registry.languages[language]["version"] if conceptual else str(index.get("dictionary_version", "невідома"))
     return categories, ambiguities, macroblocks, dictionary_version
 
 
@@ -370,8 +428,15 @@ def detect_status(
     dates: str = "",
     pages: str = "",
     notes: str = "",
+    language: str = "uk",
 ) -> str:
     title_normalized = normalize_text(title).strip()
+    if language not in {"uk", "ru"}:
+        year_pattern, withdrawn_pattern = structural_patterns(language)
+        if not case_id and year_pattern and year_pattern.fullmatch(title_normalized):
+            return "year_heading"
+        if withdrawn_pattern and withdrawn_pattern.match(title_normalized):
+            return "withdrawn"
     if YEAR_HEADING_RE.match(title_normalized) and not case_id:
         return "year_heading"
     # У частині описів службову позначку надруковано з міжлітерними
@@ -551,7 +616,8 @@ def read_records(
         for column, expected in enumerate(expected_headers, start=1):
             if column in config.get("skip_header_checks", []):
                 continue
-            if expected not in actual_headers[column - 1]:
+            english_headers = {1: {"no", "no.", "number", "id", "#"}, 2: {"title", "file title", "description"}, 3: {"dates", "date range", "date"}, 4: {"pages", "folios", "folio count", "page count"}, 5: {"notes", "note"}}
+            if expected not in actual_headers[column - 1] and actual_headers[column - 1] not in english_headers[column]:
                 issues.append(
                     Issue(
                         "WARNING", header_row, "", tr('Колонка {0}', column),
@@ -569,7 +635,8 @@ def read_records(
                 clean_cell(value) for value in values
             ]
             status = detect_status(
-                case_id_raw, title_raw, dates_raw, pages_raw, notes_raw
+                case_id_raw, title_raw, dates_raw, pages_raw, notes_raw,
+                config.get("language", "uk"),
             )
             if status == "empty":
                 continue
@@ -584,7 +651,7 @@ def read_records(
             elif status == "group_heading":
                 current_section_label = title_raw
                 current_section_year = None
-                if PERSONAL_SECTION_RE.match(title_raw):
+                if PERSONAL_SECTION_RE.match(title_raw) or personal_section_matches(title_raw, config.get("language", "uk")):
                     current_thematic_section = title_raw
                 elif not LETTER_HEADING_RE.fullmatch(title_raw):
                     current_thematic_section = ""
@@ -695,11 +762,16 @@ def classify_title(
     macroblock_order: list[str],
     language: str = "uk",
 ):
+    if language not in {"uk", "ru"} and language not in LANGUAGE_CATEGORIES:
+        import yaml
+        loaded, rules, _, _ = load_dictionaries(yaml, language)
+        LANGUAGE_CATEGORIES[language] = loaded
+        LANGUAGE_AMBIGUITIES[language] = rules
     token = MATCH_LANGUAGE.set(language)
     try:
         return _classify_title(
-            title, LANGUAGE_CATEGORIES.get(language, categories),
-            LANGUAGE_AMBIGUITIES.get(language, ambiguities), macroblock_order
+            title, categories if language == "uk" else LANGUAGE_CATEGORIES.get(language, categories),
+            ambiguities if language == "uk" else LANGUAGE_AMBIGUITIES.get(language, ambiguities), macroblock_order
         )
     finally:
         MATCH_LANGUAGE.reset(token)
@@ -722,7 +794,9 @@ def _classify_title(title, categories, ambiguities, macroblock_order):
             tokens = mask_item(tokens, phrase)
 
         matches = item_matcher(tokens)
-        category_context_evidence: list[str] = []
+        concept_score, concept_evidence, concept_context = evaluate_concepts(
+            matches, category.concepts, category.concept_rules, category.id)
+        category_context_evidence: list[str] = list(concept_context)
         for items, label in (
             (category.context_only_phrases, "фраза"),
             (category.context_only_terms, "термін"),
@@ -736,8 +810,8 @@ def _classify_title(title, categories, ambiguities, macroblock_order):
             context_labels.append(category.label)
             context_evidence[category.id] = category_context_evidence
 
-        score = 0
-        category_evidence: list[str] = []
+        score = concept_score
+        category_evidence: list[str] = list(concept_evidence)
         for items, weight, label in (
             (category.strong_phrases, 4, "фраза"),
             (category.strong_terms, 3, "термін"),
@@ -778,7 +852,7 @@ def _classify_title(title, categories, ambiguities, macroblock_order):
                 )
 
         has_subject_evidence = any(not e.startswith("контекст:") for e in category_evidence)
-        if score >= category.minimum_score and (MATCH_LANGUAGE.get() != "ru" or has_subject_evidence):
+        if score >= category.minimum_score and (MATCH_LANGUAGE.get() == "uk" or has_subject_evidence):
             matched_ids.append(category.id)
             matched_labels.append(category.label)
             scores[category.id] = score
@@ -826,8 +900,9 @@ def classify_records(
     section_results: dict[tuple[str, str], tuple] = {}
     print_classification_progress(0, total, started_at)
 
+    supported_languages = set(analysis_languages().languages)
     for processed, record in enumerate(active_records, start=1):
-        if record.language not in {"uk", "ru"}:
+        if record.language not in supported_languages:
             # Do not silently apply a different language's dictionaries.
             record.review_flags.append("unsupported_language: " + record.language)
             if processed % update_every == 0 or processed == total:
@@ -869,7 +944,7 @@ def classify_records(
             record.category_labels = [pair[1] for pair in ordered]
             category_by_id = {
                 category.id: category
-                for category in LANGUAGE_CATEGORIES.get(record.language, categories)
+                for category in (categories if record.language == "uk" else LANGUAGE_CATEGORIES.get(record.language, categories))
             }
             found_blocks = {
                 category_by_id[category_id].macroblock
@@ -1388,7 +1463,7 @@ def create_geography_tables(active: list[Record], ordered_sheets: list[str]) -> 
     by_description: Counter[tuple[str, str]] = Counter()
     by_decade: Counter[tuple[str, str, str]] = Counter()
     for record in active:
-        found = find_places(record.title_raw, places)
+        found = find_places(record.title_raw, places, record.language)
         decade = get_decade(record)
         for place, expression in found:
             row = {
@@ -1403,7 +1478,7 @@ def create_geography_tables(active: list[Record], ordered_sheets: list[str]) -> 
             totals[place.name] += 1
             by_description[place.name, record.sheet_name] += 1
             by_decade[place.name, str(row["decade"]), record.sheet_name] += 1
-        for candidate in unknown_candidates(record.title_raw, found):
+        for candidate in unknown_candidates(record.title_raw, found, record.language):
             missing.append({
                 "record_uid": record.record_uid,
                 "sheet_name": record.sheet_name, "case_id": record.case_id_normalized,
@@ -1624,7 +1699,7 @@ def create_service_tables(records: list[Record], categories: list[Category]):
     document_type_index: list[dict[str, Any]] = []
     document_type_multi = 0
     for record in active:
-        matches = match_document_types(normalize_text(record.title_raw))
+        matches = match_document_types(normalize_text(record.title_raw), record.language)
         ids = [document_type.id for document_type, _ in matches]
         document_type_counts.update(ids)
         document_type_by_sheet[record.sheet_name].update(ids)
@@ -1835,11 +1910,9 @@ def write_analysis_report(
             f"{format_count(row['unclassified'])} |"
         )
 
-    unsupported = sorted({r.language for r in records if r.language not in {"uk", "ru"}})
-    if unsupported:
-        lines.extend(["", tr(
-            'Для мов {0} тематичні словники відсутні. Класифікацію пропущено; нульове покриття не характеризує зміст документів.',
-            ', '.join(unsupported)), ""])
+    registry = LanguageRegistry.load()
+    for message, languages in registry.notices({r.language for r in records}):
+        lines.extend(["", tr(message, languages), ""])
 
     lines.extend(
         [
@@ -2534,10 +2607,12 @@ def analyze_workbook(openpyxl_module, yaml_module, plt, categories, ambiguities,
          BASE_DIR / "theme_links.py", BASE_DIR / "html_report.py",
          BASE_DIR / "report_utils.py", BASE_DIR / "visualization.py",
          BASE_DIR / "report_localization.py", REPORT_CATALOG,
+         BASE_DIR / "language_packs.py", LANGUAGE_REGISTRY,
          VISUALIZATION_CATALOG, THEME_LINKS_TEMPLATE,
          GEOGRAPHY_BASEMAP, GEOGRAPHY_TEMPLATE, TERMINOLOGY_TEMPLATE]
         + sorted(CONFIG_DIR.glob("*.yaml"))
         + sorted(DICTIONARIES_DIR.rglob("*.yaml"))
+        + LanguageRegistry.load().source_paths()
     )
     manifest = {
         "status": "complete",
@@ -2553,6 +2628,7 @@ def analyze_workbook(openpyxl_module, yaml_module, plt, categories, ambiguities,
         "pyyaml": yaml_module.__version__,
         "visualization": visual.metadata(),
         "report_language": visual.language,
+        "analysis_languages": {code: analysis_languages().metadata(code) for code in sorted({r.language for r in records})},
         "configured_sheets": list(SHEET_NAMES),
         "sources": SOURCE_CONFIG,
         "header_rows": HEADER_ROWS_BY_SHEET,
@@ -2570,7 +2646,8 @@ def analyze_workbook(openpyxl_module, yaml_module, plt, categories, ambiguities,
         json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
     )
     write_html_report(RUN_DIR, INPUT_FILE.name, scopes, issues,
-                      SCRIPT_VERSION, dictionary_version, macroblock_labels, visual=visual)
+                      SCRIPT_VERSION, dictionary_version, macroblock_labels, visual=visual,
+                      language_registry=analysis_languages())
     manifest["outputs"] = sorted(path.relative_to(RUN_DIR).as_posix()
                                  for path in RUN_DIR.rglob("*") if path.is_file())
     (RUN_DIR / "run_manifest.json").write_text(
@@ -2600,9 +2677,12 @@ def main() -> None:
     LANGUAGE_AMBIGUITIES.clear()
     LANGUAGE_CATEGORIES["uk"] = categories
     LANGUAGE_AMBIGUITIES["uk"] = ambiguities
-    ru_categories, ru_ambiguities, _, _ = load_dictionaries(yaml_module, "ru")
-    LANGUAGE_CATEGORIES["ru"] = ru_categories
-    LANGUAGE_AMBIGUITIES["ru"] = ru_ambiguities
+    for language in analysis_languages().languages:
+        if language == "uk":
+            continue
+        loaded, language_ambiguities, _, _ = load_dictionaries(yaml_module, language)
+        LANGUAGE_CATEGORIES[language] = loaded
+        LANGUAGE_AMBIGUITIES[language] = language_ambiguities
     batch_dir = OUTPUTS_DIR / run_id
     batch_dir.mkdir(parents=True, exist_ok=True)
     summary = []

@@ -79,11 +79,13 @@ Copy HR-DAST-208_MNO-Split_input.xlsx into input/, select English report
 presentation in config/analysis.yaml, and run run.bat (Python 3.12+).
 No other workbook should be placed there unless it is also to be analysed.
 
-The current thematic dictionaries cover Ukrainian and Russian. A declared
-hr corpus is read and checked, but thematic classification is skipped with
-an explicit report notice. Its zero classification coverage is not an empirical
-finding about the archive. Croatian dictionary development and validation are
-separate from file conversion and report translation.
+The aligned vocabulary now includes Croatian. A declared hr corpus is analysed
+with Croatian equivalents of the shared English reference concepts. These rules
+are development-reviewed, not independently validated. See
+[multilingual_vocabulary.md](multilingual_vocabulary.md). The earlier import-only
+version skipped Croatian classification; any zero coverage from that version
+was not an empirical finding about the archive. File conversion, dictionary
+validation and report presentation remain separate reproducible operations.
 
 ## Suggested methods paragraph
 
