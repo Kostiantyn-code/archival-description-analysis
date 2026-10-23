@@ -9,19 +9,12 @@ exports:
   source_columns: 5
   xlsx: true
   csv: true
-  unclassified_file: некласифіковані.xlsx
-  service_records_file: службові_записи.xlsx
-
-
-# Мова лише візуалізацій: uk (типово) або en. Аналіз і CSV не змінюються.
+  unclassified_file: unclassified.xlsx
+  service_records_file: service_records.xlsx
 visualization:
-  language: uk
+  language: en
   bilingual_labels: false
   label_overrides: {}
-
-# Мова аналізу незалежна від мови оформлення звіту.
 analysis:
   language: auto
   sheet_languages: {}
-  # aligned: спільні EN/UK/HR/IT поняття; legacy_uk: попередні українські правила.
-  vocabulary_mode: aligned

@@ -8,7 +8,7 @@ from pathlib import Path
 
 from report_utils import json_for_script, write_csv
 from models import Category, Record
-from visualization import Visualization
+from localization import Visualization
 
 
 TEMPLATE = Path(__file__).resolve().parent / "maps" / "theme-links-template.html"
@@ -134,36 +134,23 @@ def write_theme_links(
               extrasaction="raise", create_parent=False)
     write_csv(tables_dir / "theme_link_cases.csv", CASE_FIELDS, case_rows,
               extrasaction="raise", create_parent=False)
-    abbreviations = {
-        "politics": "Політика", "public_administration": "Управління",
-        "law_and_police": "Право і поліція", "military_affairs": "Військова справа",
-        "economy": "Економіка", "population_and_society": "Населення",
-        "personal_files": "Особові справи", "healthcare": "Здоров’я",
-        "urban_infrastructure": "Інфраструктура", "education": "Освіта",
-        "culture": "Культура і друк", "religion": "Релігія",
-    }
-    block_short = {
-        "political": "Політика й управління",
-        "socioeconomic": "Соціально-економічне",
-        "cultural": "Культурне життя", "documentary": "Тип документації",
-    }
     data = {
         "meta": {
             "bilingual": visual.bilingual,
             "cat": {key: visual.label("categories", key, label)
                     for key, label in configured_categories.items()},
             "short": {id_: visual.label("category_short", id_,
-                                       abbreviations.get(id_, label[:21] + "…" if len(label) > 22 else label))
+                                       label[:21] + "…" if len(label) > 22 else label)
                       for id_, label in configured_categories.items()},
             "block": {key: visual.label("macroblocks", key, label)
                       for key, label in blocks.items()},
             "blockShort": {id_: visual.label("macroblock_short", id_,
-                                            block_short.get(id_, label[:21] + "…" if len(label) > 22 else label))
+                                            label[:21] + "…" if len(label) > 22 else label)
                            for id_, label in blocks.items()},
             "catOrder": list(configured_categories),
             "catBlock": {category.id: category.macroblock for category in categories},
             "descriptions": [[s, visual.description(s, sheet_labels[s])] for s in sheets],
-            "scopes": [["__all__", visual.text("Усі описи")], *[[s, visual.description(s, sheet_labels[s])] for s in sheets]],
+            "scopes": [["__all__", visual.text('All inventories')], *[[s, visual.description(s, sheet_labels[s])] for s in sheets]],
         },
         "scopes": breakdown,
     }

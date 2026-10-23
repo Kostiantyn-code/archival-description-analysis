@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from models import Record
-from terminology import match_terms, write_terminology_report
+from mentions import match_terms, write_terminology_report
 
 
 def case(sheet, title, year, row):
@@ -56,7 +56,7 @@ class TerminologyTests(unittest.TestCase):
             self.assertTrue(any(r["decade"] == "unknown" for r in mentions))
             html = (path / "terminology_evolution.html").read_text(encoding="utf-8")
             self.assertIn("Тестовий фонд", html)
-            self.assertIn("Архів N: опис Б", html)
+            self.assertIn("Архів N: inventory Б", html)
             self.assertNotIn("__DATA__", html)
 
 

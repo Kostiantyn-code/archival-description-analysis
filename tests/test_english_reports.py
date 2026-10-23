@@ -15,8 +15,8 @@ import openpyxl
 import yaml
 import fond_analysis as f
 from html_report import write_html_report
-from report_localization import Report
-from visualization import Visualization
+from localization import Report
+from localization import Visualization
 
 
 def make_input(path, language=None):
@@ -38,7 +38,16 @@ class EnglishReportTests(unittest.TestCase):
         report = Report(Visualization("en"))
         raw = "Немає даних для цього зрізу. {1} <script>"
         self.assertEqual(report.text("Файл: {0}", raw), "File: " + raw)
-        self.assertEqual(Report().text("Файл: {0}", raw), "Файл: " + raw)
+        self.assertEqual(Report(Visualization("uk")).text("Файл: {0}", raw), "Файл: " + raw)
+
+    def test_console_summary_uses_the_selected_language(self):
+        data = {key: [] for key in ('active', 'context_only', 'unclassified', 'needs_review', 'context_mentions')}
+        for language, caption, answer in [('en', 'Charts created:', 'yes'), ('uk', 'Графіки створено:', 'так')]:
+            output = io.StringIO()
+            with patch.object(f, 'ANALYSIS_CONFIG', {'visualization': {'language': language}}), contextlib.redirect_stdout(output):
+                f.print_summary([], [], data, True)
+            line = next(line for line in output.getvalue().splitlines() if caption in line)
+            self.assertEqual(line.split(':', 1)[1].strip(), answer)
 
     def test_english_empty_page_and_table_limits(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -80,7 +89,7 @@ class EnglishReportTests(unittest.TestCase):
                 self.assertIn("невідомо", log)  # original problematic cell
                 manifest = json.loads((en / "run_manifest.json").read_text())
                 self.assertEqual(manifest["report_language"], "en")
-                self.assertIn("config/report.en.json", manifest["sha256"])
+                self.assertIn("config/localization.json", manifest["sha256"])
             finally:
                 for key, value in old.items():
                     setattr(f, key, value)

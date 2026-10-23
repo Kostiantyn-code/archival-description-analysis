@@ -39,7 +39,7 @@ class AnalysisTests(unittest.TestCase):
                 f.configure_workbook_sources(__import__('openpyxl'))
             finally:
                 f.INPUT_FILE = previous
-        cls.uk, cls.amb, cls.mac, _ = f.load_dictionaries(yaml, legacy=True)
+        cls.uk, cls.amb, cls.mac, _ = f.load_dictionaries(yaml)
         ru, amb, *_ = f.load_dictionaries(yaml, 'ru')
         f.LANGUAGE_CATEGORIES.update(uk=cls.uk, ru=ru)
         f.LANGUAGE_AMBIGUITIES.update(uk=cls.amb, ru=amb)
@@ -149,9 +149,9 @@ class AnalysisTests(unittest.TestCase):
     def test_healthcare_is_configured_bilingually(self):
         healthcare_uk = next(c for c in f.LANGUAGE_CATEGORIES['uk'] if c.id == 'healthcare')
         healthcare_ru = next(c for c in f.LANGUAGE_CATEGORIES['ru'] if c.id == 'healthcare')
-        self.assertEqual(healthcare_uk.export_filename, 'охорона_здоров’я.xlsx')
-        self.assertEqual(healthcare_ru.export_filename, 'охорона_здоров’я.xlsx')
-        self.assertIn('карантин', healthcare_uk.context_only_terms)
+        self.assertEqual(healthcare_uk.export_filename, 'healthcare.xlsx')
+        self.assertEqual(healthcare_ru.export_filename, 'healthcare.xlsx')
+        self.assertIn('карантин', next(c['terms'] for c in healthcare_uk.concepts if c['id']=='medical_institution'))
         self.assertIn('карантин', healthcare_ru.context_only_terms)
 
     def test_classification_type_is_multilabel_aware(self):
@@ -210,13 +210,13 @@ class AnalysisTests(unittest.TestCase):
                 )
                 category = next(c for c in self.uk if c.id == 'healthcare')
                 f.export_thematic_selections(__import__('openpyxl'), [record], [category])
-                self.assertTrue((f.THEMATIC_DIR / 'охорона_здоров’я.xlsx').exists())
-                self.assertFalse((f.THEMATIC_DIR / 'культура.xlsx').exists())
-                self.assertTrue((f.THEMATIC_DIR / 'некласифіковані.xlsx').exists())
-                self.assertTrue((f.THEMATIC_DIR / 'службові_записи.xlsx').exists())
+                self.assertTrue((f.THEMATIC_DIR / 'healthcare.xlsx').exists())
+                self.assertFalse((f.THEMATIC_DIR / 'culture.xlsx').exists())
+                self.assertTrue((f.THEMATIC_DIR / 'unclassified.xlsx').exists())
+                self.assertTrue((f.THEMATIC_DIR / 'service_records.xlsx').exists())
                 from openpyxl import load_workbook
                 result = load_workbook(
-                    f.THEMATIC_DIR / 'охорона_здоров’я.xlsx', read_only=False
+                    f.THEMATIC_DIR / 'healthcare.xlsx', read_only=False
                 )
                 self.assertEqual(result.sheetnames, list(f.SHEET_NAMES))
                 self.assertEqual(
@@ -250,34 +250,14 @@ class AnalysisTests(unittest.TestCase):
         try:
             with tempfile.TemporaryDirectory() as directory:
                 directory = Path(directory)
-                config = {
-                    'dictionary_version': 'test',
-                    'classification': {'minimum_score': 3},
-                    'macroblocks': {'cultural': {'label': 'Культурне життя'}},
-                    'categories': [
-                        {
-                            'id': 'culture', 'label': 'Культура',
-                            'macroblock': 'cultural', 'enabled': True,
-                            'export': 'культура.xlsx',
-                            'dictionaries': {
-                                'uk': str(ROOT / 'dictionaries/cultural/culture.yaml')
-                            },
-                        },
-                        {
-                            'id': 'education', 'label': 'Освіта',
-                            'macroblock': 'cultural', 'enabled': False,
-                            'export': 'освіта.xlsx',
-                            'dictionaries': {
-                                'uk': str(ROOT / 'dictionaries/cultural/education.yaml')
-                            },
-                        },
-                    ],
-                }
+                config = yaml.safe_load((ROOT/'config/categories.yaml').read_text())
+                for category in config['categories']:
+                    category['enabled'] = category['id']=='culture'
                 (directory / 'categories.yaml').write_text(
                     yaml.safe_dump(config, allow_unicode=True), encoding='utf-8'
                 )
                 f.CONFIG_DIR = directory
-                categories, *_ = f.load_dictionaries(yaml, 'uk', legacy=True)
+                categories, *_ = f.load_dictionaries(yaml, 'uk')
                 self.assertEqual([category.id for category in categories], ['culture'])
         finally:
             f.CONFIG_DIR = old_config_dir

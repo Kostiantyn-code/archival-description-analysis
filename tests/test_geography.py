@@ -11,7 +11,7 @@ sys.path.insert(0, str(ROOT))
 
 import fond_analysis as analysis
 from geography import find_places, unknown_candidates
-from geography_maps import write_maps
+from geography import write_maps
 
 
 class GeographyTests(unittest.TestCase):
@@ -65,7 +65,7 @@ class GeographyTests(unittest.TestCase):
             for name in ("south", "europe", "russia"):
                 content = (folder / f"geography_{name}.html").read_text()
                 self.assertIn("Миколаїв", content)
-                self.assertIn("Європейська частина РФ", content)
+                self.assertIn("European Russia", content)
                 self.assertNotIn("tile.openstreetmap.org", content)
                 self.assertNotIn("__BASEMAP__", content)
 

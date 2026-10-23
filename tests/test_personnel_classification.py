@@ -17,7 +17,7 @@ class PersonnelClassificationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         f.configure_analysis(yaml)
-        cls.uk, cls.amb_uk, cls.blocks, _ = f.load_dictionaries(yaml, legacy=True)
+        cls.uk, cls.amb_uk, cls.blocks, _ = f.load_dictionaries(yaml)
         cls.ru, cls.amb_ru, _, _ = f.load_dictionaries(yaml, "ru")
         f.LANGUAGE_CATEGORIES.update(uk=cls.uk, ru=cls.ru)
         f.LANGUAGE_AMBIGUITIES.update(uk=cls.amb_uk, ru=cls.amb_ru)
@@ -91,7 +91,7 @@ class PersonnelClassificationTests(unittest.TestCase):
             self.assertEqual(set(cases[1].categories), {"personal_files", "law_and_police"})
             self.assertFalse(cases[2].categories)
             self.assertEqual(set(cases[3].categories), {"personal_files", "education"})
-            self.assertIn("розділ опису", f.record_to_row(cases[0])["evidence"])
+            self.assertIn("inventory_section", f.record_to_row(cases[0])["evidence"])
             self.assertEqual(f.classification_index_row(cases[0])["thematic_section"],
                              "Особові справи ув’язнених")
             self.assertEqual(records[-1].status, "inventory")

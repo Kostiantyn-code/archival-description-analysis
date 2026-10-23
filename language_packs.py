@@ -1,24 +1,24 @@
-"""Declarative analysis languages, English reference concepts and UDC anchors.
+"""One declarative file per analysis language; English defines shared concepts.
 
-This module never selects the report/interface language. New packs contain data,
-not Python modules; no arbitrary code is imported from the registry.
+UDC numbers are broader subject anchors. Search forms and scoring stay separate
+from the language used to present the report.
 """
-from __future__ import annotations
 
+from __future__ import annotations
 from dataclasses import dataclass
-from pathlib import Path
 from functools import lru_cache
+from pathlib import Path
 import re
 import unicodedata
-
 import yaml
+from models import CATEGORY_RULE_FIELDS
 
 ROOT = Path(__file__).resolve().parent
-REGISTRY = ROOT / "config" / "languages.yaml"
+REGISTRY = ROOT / "dictionaries" / "en.yaml"
 
 
 class UniqueKeyLoader(yaml.SafeLoader):
-    """Reject duplicate YAML keys instead of silently overwriting translations."""
+    """Do not silently overwrite duplicate vocabulary entries."""
 
 
 def _unique_mapping(loader, node):
@@ -31,7 +31,9 @@ def _unique_mapping(loader, node):
     return result
 
 
-UniqueKeyLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _unique_mapping)
+UniqueKeyLoader.add_constructor(
+    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _unique_mapping
+)
 
 
 def read_mapping(path: Path) -> dict:
@@ -41,177 +43,234 @@ def read_mapping(path: Path) -> dict:
     return data
 
 
-def local_path(root: Path, value: str) -> Path:
-    path = (root / value).resolve()
-    if not path.is_relative_to(root.resolve()):
-        raise ValueError("Language-pack paths must stay inside the project")
-    return path
-
-
 @dataclass
 class LanguageRegistry:
     root: Path
-    data: dict
+    languages: dict
     reference: dict
 
     @classmethod
     def load(cls, path: Path | None = None):
-        path = Path(path) if path is not None else REGISTRY
-        data = read_mapping(path)
-        root = path.parent.parent
-        if data.get("schema_version") != 1 or data.get("reference_language") != "en":
-            raise ValueError("languages.yaml: expected schema_version 1 and reference_language en")
-        languages = data.get("languages")
-        if not isinstance(languages, dict) or not {"en", "uk", "ru"} <= set(languages):
-            raise ValueError("languages.yaml: languages must be a nonempty mapping")
-        for code, pack in languages.items():
-            if not re.fullmatch(r"[a-z]{2,3}", code) or not isinstance(pack, dict):
-                raise ValueError("languages.yaml: invalid language entry")
-            if pack.get("vocabulary") not in {"reference", "legacy"}:
-                raise ValueError(f"{code}: vocabulary must be reference or legacy")
-            if pack.get("vocabulary") == "legacy" and code not in {"uk", "ru"}:
-                raise ValueError(f"{code}: legacy vocabulary is reserved for uk/ru")
-            if code in {"uk", "ru"} and pack.get("matching") != "legacy_" + code:
-                raise ValueError(f"{code}: legacy matching profile must match its language")
-            if pack.get("matching") not in {"legacy_uk", "legacy_ru", "unicode_exact"}:
-                raise ValueError(f"{code}: unsupported matching profile")
-            if pack.get("matching") in {"legacy_uk", "legacy_ru"} and code not in {"uk", "ru"}:
-                raise ValueError(f"{code}: legacy matching is reserved for uk/ru")
-            if not isinstance(pack.get("version"), str) or not isinstance(pack.get("validation_status"), str):
+        reference_path = Path(path) if path is not None else REGISTRY
+        packs = {}
+        for file in sorted(reference_path.parent.glob("*.yaml")):
+            if not re.fullmatch(r"[a-z]{2,3}", file.stem):
+                continue
+            pack = read_mapping(file)
+            code = pack.get("language")
+            if code != file.stem or pack.get("schema_version") != 1:
+                raise ValueError(f"{file}: expected schema 1 and language {file.stem}")
+            if pack.get("matching") not in {"uk_light", "ru_light", "unicode_exact"}:
+                raise ValueError(f"{code}: unknown matching profile")
+            if (
+                pack["matching"] in {"uk_light", "ru_light"}
+                and pack["matching"] != code + "_light"
+            ):
+                raise ValueError(
+                    f"{code}: matching profile belongs to another language"
+                )
+            if pack.get("vocabulary") not in {"reference", "weighted_rules"}:
+                raise ValueError(
+                    f"{code}: expected reference concepts or weighted_rules"
+                )
+            if not isinstance(pack.get("version"), str) or not isinstance(
+                pack.get("validation_status"), str
+            ):
                 raise ValueError(f"{code}: version and validation_status are required")
-            for field in ("detection_terms", "year_words", "withdrawn_terms"):
+            for field in (
+                "detection_terms",
+                "year_words",
+                "withdrawn_terms",
+                "place_prefixes",
+            ):
                 cls._terms(pack.get(field, []), f"{code}:{field}")
-            modules = pack.get("ancillary_modules", {})
-            if not isinstance(modules, dict) or set(modules) - {"document_types", "terminology", "geography"} or any(not isinstance(v, bool) for v in modules.values()):
-                raise ValueError(f"{code}: invalid ancillary_modules settings")
-        reference = read_mapping(local_path(root, data["reference_file"]))
-        if reference.get("language") != "en" or reference.get("schema_version") != 1:
-            raise ValueError("Reference vocabulary must use schema 1 and language en")
-        concepts = reference.get("concepts", [])
+            packs[code] = {**pack, "_path": file}
+        if "en" not in packs or packs["en"]["vocabulary"] != "reference":
+            raise ValueError("An English reference vocabulary is required")
+        reference = packs["en"]
+        concepts = reference.get("concepts")
         if not isinstance(concepts, list) or not concepts:
-            raise ValueError("Reference vocabulary has no concepts")
+            raise ValueError("The English vocabulary must define concepts")
         seen = set()
         for concept in concepts:
             if not isinstance(concept, dict):
-                raise ValueError("Each reference concept must be a mapping")
+                raise ValueError("A concept must be a mapping")
             cid = concept.get("id", "")
             if not re.fullmatch(r"[a-z0-9_]+", cid) or cid in seen:
-                raise ValueError(f"Invalid or duplicate reference concept: {cid}")
+                raise ValueError(f"Invalid or duplicate concept ID: {cid}")
             seen.add(cid)
             if concept.get("kind") not in {"subject", "context"}:
                 raise ValueError(f"{cid}: expected subject or context")
-            if not isinstance(concept.get("udc_codes"), list) or not all(isinstance(x, str) and re.fullmatch(r"[0-9./]+", x) for x in concept["udc_codes"]):
+            if not concept.get("label_en") or not concept.get("scope_note"):
+                raise ValueError(f"{cid}: label and scope note are required")
+            codes = concept.get("udc_codes")
+            if not isinstance(codes, list) or any(
+                not isinstance(c, str) or not re.fullmatch(r"[0-9./]+", c)
+                for c in codes
+            ):
                 raise ValueError(f"{cid}: UDC codes must be strings")
-            cls._terms(concept.get("terms"), cid)
-            if not concept["terms"] or not concept.get("scope_note") or not concept.get("label_en"):
-                raise ValueError(f"{cid}: reference terms, label and scope note are required")
-            relation = concept.get("udc_relation")
-            if relation != ("broader_subject_anchor" if concept["udc_codes"] else "not_assigned"):
+            if concept.get("udc_relation") != (
+                "broader_subject_anchor" if codes else "not_assigned"
+            ):
                 raise ValueError(f"{cid}: inconsistent UDC relation")
+            cls._terms(concept.get("terms"), cid)
+            if not concept["terms"]:
+                raise ValueError(f"{cid}: English search terms are required")
         rule_ids = set()
         for rule in reference.get("rules", []):
-            if not isinstance(rule, dict) or not re.fullmatch(r"[a-z0-9_]+", rule.get("id", "")) or rule["id"] in rule_ids:
-                raise ValueError("Invalid or duplicate rule ID")
-            rule_ids.add(rule["id"])
+            rid = rule.get("id", "")
+            if not re.fullmatch(r"[a-z0-9_]+", rid) or rid in rule_ids:
+                raise ValueError(f"Invalid or duplicate rule ID: {rid}")
+            rule_ids.add(rid)
             for field in ("all", "any"):
-                if not isinstance(rule.get(field, []), list) or any(cid not in seen for cid in rule.get(field, [])):
-                    raise ValueError(f"Unknown concept in reference rule: {rule}")
-            if not rule.get("all") or not rule.get("any"):
-                raise ValueError("Reference rules require all and any concept IDs")
-        return cls(root, data, reference)
+                if (
+                    not isinstance(rule.get(field), list)
+                    or not rule[field]
+                    or set(rule[field]) - seen
+                ):
+                    raise ValueError(f"{rid}: unknown or missing concept IDs")
+        return cls(reference_path.parent.parent, packs, reference)
 
     @staticmethod
     def _terms(terms, identifier):
-        if not isinstance(terms, list) or not all(isinstance(term, str) and term.strip() for term in terms):
-            raise ValueError(f"{identifier}: terms must be a list of nonempty strings")
-        if len(terms) != len({unicodedata.normalize("NFC", t).casefold() for t in terms}):
+        if not isinstance(terms, list) or any(
+            not isinstance(t, str) or not t.strip() for t in terms
+        ):
+            raise ValueError(f"{identifier}: expected nonempty strings in a list")
+        if len(terms) != len(
+            {unicodedata.normalize("NFC", t).casefold() for t in terms}
+        ):
             raise ValueError(f"{identifier}: duplicate terms")
 
-    @property
-    def languages(self):
-        return self.data["languages"]
-
-    def compile(self, language: str, category_index: dict):
-        """Return category-aligned concepts and rules; absent aliases abstain."""
+    def compile(self, language, category_index):
         if language not in self.languages:
-            raise ValueError(f"No analysis language pack: {language}")
+            raise ValueError(f"No analysis dictionary for: {language}")
         pack = self.languages[language]
-        if pack["vocabulary"] != "reference":
-            raise ValueError("Legacy dictionaries use the existing category loader")
-        ids = {row["id"]: row for row in self.reference["concepts"]}
-        if language == "en":
-            if self.reference.get("version") != pack["version"]:
-                raise ValueError("en: registry/reference version mismatch")
-            aliases = {cid: row["terms"] for cid, row in ids.items()}
-            extra = self.reference
-        else:
-            extra = read_mapping(local_path(self.root, pack["terms_file"]))
-            if extra.get("schema_version") != 1 or extra.get("language") != language or extra.get("reference_version") != self.reference["version"] or extra.get("version") != pack["version"] or extra.get("validation_status") != pack["validation_status"]:
-                raise ValueError(f"{language}: language or reference_version mismatch")
-            aliases = extra.get("concepts", {})
-            if not isinstance(aliases, dict) or set(aliases) != set(ids):
-                raise ValueError(f"{language}: concept IDs must exactly match the English reference; use [] for an unavailable equivalent")
-        labels = extra.get("preferred_labels", {})
-        if language != "en" and (not isinstance(labels, dict) or set(labels) != set(ids) or any(not isinstance(v, str) or not v.strip() for v in labels.values())):
-            raise ValueError(f"{language}: preferred labels must cover every concept")
+        categories = {row["id"] for row in category_index["categories"]}
+        if pack["vocabulary"] == "weighted_rules":
+            rules = pack.get("categories", {})
+            if not isinstance(rules, dict) or set(rules) != categories:
+                raise ValueError(
+                    f"{language}: weighted categories must match the category index"
+                )
+            for cid, data in rules.items():
+                for field in CATEGORY_RULE_FIELDS:
+                    if field != "context_rules":
+                        self._terms(data.get(field, []), f"{language}:{cid}:{field}")
+                for rule in data.get("context_rules", []):
+                    for field in ("all", "any"):
+                        self._terms(rule.get(field, []), f"{language}:{cid}:{field}")
+            return rules, pack
+        ids = {c["id"]: c for c in self.reference["concepts"]}
+        aliases = (
+            {cid: c["terms"] for cid, c in ids.items()}
+            if language == "en"
+            else pack.get("concepts", {})
+        )
+        if not isinstance(aliases, dict) or set(aliases) != set(ids):
+            raise ValueError(
+                f"{language}: concept IDs must match English; use [] for an unavailable equivalent"
+            )
+        if (
+            language != "en"
+            and pack.get("reference_version") != self.reference["version"]
+        ):
+            raise ValueError(f"{language}: reference version mismatch")
         for section in ("document_types", "terminology", "place_aliases"):
-            values = extra.get(section, {})
-            if not isinstance(values, dict) or set(values) - set(self.reference.get(section, {})):
-                raise ValueError(f"{language}: unknown identifiers in {section}")
+            values = pack.get(section, {})
+            if not isinstance(values, dict) or set(values) - set(
+                self.reference.get(section, {})
+            ):
+                raise ValueError(f"{language}: unknown {section} IDs")
             for key, terms in values.items():
                 self._terms(terms, f"{language}:{section}:{key}")
-        categories = {row["id"] for row in category_index["categories"]}
-        compiled = {key: {"concepts": [], "concept_rules": []} for key in categories}
-        for cid, definition in ids.items():
-            if definition["category"] not in categories and definition["category"] is not None:
-                raise ValueError(f"{cid}: unknown category")
+        compiled = {cid: {"concepts": [], "concept_rules": []} for cid in categories}
+        for cid, concept in ids.items():
             self._terms(aliases[cid], f"{language}:{cid}")
-            category = definition["category"]
-            if category:
-                compiled[category]["concepts"].append({**definition, "terms": aliases[cid]})
+            category = concept["category"]
+            if category is not None and category not in categories:
+                raise ValueError(f"{cid}: unknown category {category}")
+            if category is not None:
+                compiled[category]["concepts"].append(
+                    {**concept, "terms": aliases[cid]}
+                )
         for rule in self.reference.get("rules", []):
-            category = rule["category"]
-            if category not in categories:
-                raise ValueError(f"Unknown rule category: {category}")
-            # Every category needs its action concepts for rule evaluation.
-            present = {c["id"] for c in compiled[category]["concepts"]}
+            if rule["category"] not in categories:
+                raise ValueError(f"Unknown rule category: {rule['category']}")
+            target = compiled[rule["category"]]
+            present = {c["id"] for c in target["concepts"]}
             for cid in rule["all"] + rule["any"]:
                 if cid not in present:
-                    compiled[category]["concepts"].append({**ids[cid], "terms": aliases[cid]})
+                    target["concepts"].append({**ids[cid], "terms": aliases[cid]})
                     present.add(cid)
-            compiled[category]["concept_rules"].append(rule)
-        return compiled, extra
+            target["concept_rules"].append(rule)
+        return compiled, pack
+
+    def modules(self, language):
+        pack = self.languages.get(language, {})
+        return {
+            module: language in {"uk", "ru"} or section in pack
+            for module, section in [
+                ("document_types", "document_types"),
+                ("terminology", "terminology"),
+                ("geography", "place_aliases"),
+            ]
+        }
 
     def metadata(self, language):
         pack = self.languages.get(language)
         if not pack:
             return {"language": language, "status": "unsupported"}
-        return {"language": language, "version": pack["version"],
-                "validation_status": pack["validation_status"], "matching": pack["matching"],
-                "reference_language": "en", "reference_version": self.reference["version"],
-                "alignment": "legacy_category_ids_only" if pack["vocabulary"] == "legacy" else "reference_concepts",
-                "ancillary_modules": pack.get("ancillary_modules", {})}
+        return {
+            "language": language,
+            "version": pack["version"],
+            "validation_status": pack["validation_status"],
+            "matching": pack["matching"],
+            "reference_language": "en",
+            "reference_version": self.reference["version"],
+            "alignment": (
+                "reference_concepts"
+                if pack["vocabulary"] == "reference"
+                else "language_specific_rules"
+            ),
+            "source": pack["_path"].relative_to(self.root).as_posix(),
+            "ancillary_modules": self.modules(language),
+        }
 
     def source_paths(self):
-        return [local_path(self.root, self.data["reference_file"]), *(
-            local_path(self.root, p["terms_file"]) for p in self.languages.values() if "terms_file" in p)]
+        return [pack["_path"] for pack in self.languages.values()]
 
     def notices(self, languages):
         languages = set(languages)
         unsupported = sorted(languages - set(self.languages))
-        draft = sorted(code for code in languages if code in self.languages and self.languages[code]["vocabulary"] == "reference")
         if unsupported:
-            yield ('Для мов {0} тематичні словники відсутні. Класифікацію пропущено; нульове покриття не характеризує зміст документів.', ', '.join(unsupported))
+            yield (
+                "Для мов {0} тематичні словники відсутні. Класифікацію пропущено; нульове покриття не характеризує зміст документів.",
+                ", ".join(unsupported),
+            )
+        draft = sorted(
+            code
+            for code in languages
+            if code in self.languages
+            and self.languages[code]["validation_status"] != "independently_validated"
+        )
         if draft:
-            yield ('Словники мов {0} є робочими та не пройшли незалежної експертної валідації. Покриття класифікацією не є оцінкою точності.', ', '.join(draft))
+            yield (
+                "Словники мов {0} є робочими та не пройшли незалежної експертної валідації. Покриття класифікацією не є оцінкою точності.",
+                ", ".join(draft),
+            )
         for module, message in {
-            'document_types': 'Для мов {0} не підключено словник типів документів. Нульові значення не доводять відсутності згадок.',
-            'terminology': 'Для мов {0} не підключено термінологічний словник. Нульові значення не доводять відсутності згадок.',
-            'geography': 'Для мов {0} не підключено географічний словник. Нульові значення не доводять відсутності згадок.',
+            "document_types": "Для мов {0} не підключено словник типів документів. Нульові значення не доводять відсутності згадок.",
+            "terminology": "Для мов {0} не підключено термінологічний словник. Нульові значення не доводять відсутності згадок.",
+            "geography": "Для мов {0} не підключено географічний словник. Нульові значення не доводять відсутності згадок.",
         }.items():
-            absent = sorted(code for code in languages if code in self.languages and not self.languages[code].get('ancillary_modules', {}).get(module, False))
-            if absent:
-                yield (message, ', '.join(absent))
+            missing = sorted(
+                code
+                for code in languages
+                if code in self.languages and not self.modules(code)[module]
+            )
+            if missing:
+                yield (message, ", ".join(missing))
 
 
 @lru_cache(maxsize=32)
@@ -220,18 +279,18 @@ def pack_content(language):
     if language not in registry.languages:
         return {}
     pack = registry.languages[language]
-    if pack["vocabulary"] == "legacy":
+    if pack["vocabulary"] == "weighted_rules":
         return {}
-    content = registry.reference if language == "en" else read_mapping(local_path(registry.root, pack["terms_file"]))
-    return {**content, '_ancillary_modules': pack.get('ancillary_modules', {})}
+    content = pack
+    return {**content, "_ancillary_modules": registry.modules(language)}
 
 
 @lru_cache(maxsize=128)
 def lexical_patterns(language, section):
     patterns = {}
     content = pack_content(language)
-    module = 'geography' if section == 'place_aliases' else section
-    if not content.get('_ancillary_modules', {}).get(module, False):
+    module = "geography" if section == "place_aliases" else section
+    if not content.get("_ancillary_modules", {}).get(module, False):
         return patterns
     for key, terms in content.get(section, {}).items():
         if terms:
@@ -239,33 +298,63 @@ def lexical_patterns(language, section):
             for term in terms:
                 words = re.findall(r"[^\W_]+", unicodedata.normalize("NFC", term))
                 variants.append(r"[^\w_]+".join(re.escape(word) for word in words))
-            patterns[key] = re.compile(r"(?<!\w)(?:" + "|".join(variants) + r")(?!\w)", re.I)
+            patterns[key] = re.compile(
+                r"(?<!\w)(?:" + "|".join(variants) + r")(?!\w)", re.I
+            )
     return patterns
 
 
 def alias_hits(title, language, section):
     title = unicodedata.normalize("NFC", title)
-    return {key: hit.group() for key, pattern in lexical_patterns(language, section).items()
-            if (hit := pattern.search(title))}
+    return {
+        key: hit.group()
+        for key, pattern in lexical_patterns(language, section).items()
+        if (hit := pattern.search(title))
+    }
 
 
 @lru_cache(maxsize=32)
 def structural_patterns(language):
     pack = LanguageRegistry.load().languages.get(language, {})
-    words = pack.get('year_words', [])
-    year = re.compile(r'^\s*(?:1[5-9]|20)\d{2}\s*\.?\s*(?:' + '|'.join(re.escape(word) for word in words) + r')\.?\s*$', re.I) if words else None
-    terms = pack.get('withdrawn_terms', [])
-    withdrawn = re.compile(r'^\s*(?:' + '|'.join(re.escape(term) for term in terms) + r')(?=$|[^\w])', re.I) if terms else None
+    words = pack.get("year_words", [])
+    year = (
+        re.compile(
+            r"^\s*(?:1[5-9]|20)\d{2}\s*\.?\s*(?:"
+            + "|".join(re.escape(word) for word in words)
+            + r")\.?\s*$",
+            re.I,
+        )
+        if words
+        else None
+    )
+    terms = pack.get("withdrawn_terms", [])
+    withdrawn = (
+        re.compile(
+            r"^\s*(?:" + "|".join(re.escape(term) for term in terms) + r")(?=$|[^\w])",
+            re.I,
+        )
+        if terms
+        else None
+    )
     return year, withdrawn
 
 
 def personal_section_matches(title, language):
     content = pack_content(language)
-    if language == 'en':
-        terms = next((c['terms'] for c in content.get('concepts', []) if c['id'] == 'personal_documentation'), [])
+    if language == "en":
+        terms = next(
+            (
+                c["terms"]
+                for c in content.get("concepts", [])
+                if c["id"] == "personal_documentation"
+            ),
+            [],
+        )
     else:
-        terms = content.get('concepts', {}).get('personal_documentation', [])
-    return any(re.match(r'^\s*' + re.escape(term) + r'(?!\w)', title, re.I) for term in terms)
+        terms = content.get("concepts", {}).get("personal_documentation", [])
+    return any(
+        re.match(r"^\s*" + re.escape(term) + r"(?!\w)", title, re.I) for term in terms
+    )
 
 
 def evaluate_concepts(matches, concepts, rules, category_id):
@@ -283,8 +372,15 @@ def evaluate_concepts(matches, concepts, rules, category_id):
         else:
             context.append(evidence)
     for rule in rules:
-        if all(hits[cid] for cid in rule["all"]) and any(hits[cid] for cid in rule["any"]):
+        if all(hits[cid] for cid in rule["all"]) and any(
+            hits[cid] for cid in rule["any"]
+        ):
             score += 3
             used = [cid for cid in rule["all"] + rule["any"] if hits[cid]]
-            subject.append("concept_rule:" + rule["id"] + ": " + "; ".join(cid + "=" + " | ".join(hits[cid]) for cid in used))
+            subject.append(
+                "concept_rule:"
+                + rule["id"]
+                + ": "
+                + "; ".join(cid + "=" + " | ".join(hits[cid]) for cid in used)
+            )
     return score, subject, context

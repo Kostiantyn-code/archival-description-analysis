@@ -9,8 +9,8 @@ from pathlib import Path
 from urllib.parse import quote
 
 from models import Issue, Record
-from visualization import Visualization
-from report_localization import Report
+from localization import Visualization
+from localization import Report
 from language_packs import LanguageRegistry
 
 
@@ -41,13 +41,13 @@ def _url(path: Path, root: Path) -> str:
 
 
 def _link(path: Path, root: Path, label: str | None = None, report: Report = Report()) -> str:
-    return f'<a href="{_url(path, root)}">{_escape(label or report.filename(path))}</a>'
+    return f'<a href="{_url(path, root)}">{_escape(label or path.name)}</a>'
 
 
 def _table(headers, rows, tr=Report().text) -> str:
     rows = list(rows)
     if not rows:
-        return tr('<p class="muted">Немає даних для цього зрізу.</p>')
+        return tr('<p class="muted">No data for this scope.</p>')
     head = "".join(f'<th scope="col">{_escape(value)}</th>' for value in headers)
     body = "".join("<tr>" + "".join(f"<td>{_escape(value)}</td>" for value in row)
                    + "</tr>" for row in rows)
@@ -57,7 +57,7 @@ def _table(headers, rows, tr=Report().text) -> str:
 def _csv_table(path: Path, root: Path, columns, limit: int = 50, report: Report = Report()) -> str:
     tr = report.text
     if not path.is_file():
-        return tr('<p class="muted">Таблицю не створено.</p>')
+        return tr('<p class="muted">The table was not generated.</p>')
     # Keep the HTML bounded even for large source collections.
     rows = []
     count = 0
@@ -66,15 +66,15 @@ def _csv_table(path: Path, root: Path, columns, limit: int = 50, report: Report 
             count += 1
             if len(rows) < limit:
                 rows.append([report.csv_value(row, key) for key, _ in columns])
-    note = tr('Показано {0} із {1} рядків. ', len(rows), count) if count > limit else ""
+    note = tr('Showing {0} of {1} rows. ', len(rows), count) if count > limit else ""
     return (_table([label for _, label in columns], rows, tr=tr)
-            + f'<p class="muted">{note}{_link(path, root, tr("Повна таблиця CSV"))}</p>')
+            + f'<p class="muted">{note}{_link(path, root, tr('Full CSV table'))}</p>')
 
 
 def _files(paths, root: Path, report: Report = Report()) -> str:
     tr = report.text
     links = "".join(f"<li>{_link(path, root, report=report)}</li>" for path in sorted(paths) if path.is_file())
-    return f"<ul>{links}</ul>" if links else tr('<p class="muted">Файлів немає.</p>')
+    return f"<ul>{links}</ul>" if links else tr('<p class="muted">No files.</p>')
 
 
 def write_html_report(
@@ -83,6 +83,7 @@ def write_html_report(
     macroblock_labels: dict[str, str],
     visual: Visualization | None = None,
     language_registry: LanguageRegistry | None = None,
+    manifest_path: Path | None = None,
 ) -> Path:
     """Write one report per workbook; combined is not added to fond totals."""
     visual = visual or Visualization()
@@ -100,14 +101,14 @@ def write_html_report(
         scoped_issues = issues if scope == "combined" else [
             issue for issue in issues if not issue.sheet_name or issue.sheet_name in sheets]
         counts = Counter(issue.level for issue in scoped_issues)
-        refs = sorted({tr('{0}, ф. {1}', visual.label('archives', r.source_archive, r.source_archive), r.source_fond) for r in records})
-        title = tr('Спільний зріз книги') if scope == "combined" else "; ".join(refs) or scope
+        refs = sorted({tr('{0}, fond {1}', visual.label('archives', r.source_archive, r.source_archive), r.source_fond) for r in records})
+        title = tr('Combined workbook scope') if scope == "combined" else "; ".join(refs) or scope
         anchor = f"scope-{number}"
         navigation.append(f'<a href="#{anchor}">{_escape(title)}</a>')
         tables, figures, reports = (root / folder / scope for folder in ("tables", "figures", "reports"))
         years = [year for record in active for year in (record.start_year, record.end_year)
                  if year is not None]
-        year_range = f"{min(years)}–{max(years)}" if years else tr('Не визначено')
+        year_range = f"{min(years)}–{max(years)}" if years else tr('Not determined')
         subject = sum(bool(record.categories) for record in active)
         context = sum(not record.categories and bool(record.context_categories) for record in active)
 
@@ -115,38 +116,38 @@ def write_html_report(
             return f"{value / len(active) * 100:.2f}" if active else "—"
 
         cards = "".join(f'<article class="card"><strong>{_escape(value)}</strong><span>{label}</span></article>'
-                        for value, label in ((len(active), tr('справ в аналізі')),
-                                             (len(sheets), tr('описів')), (year_range, tr('крайні роки справ'))))
+                        for value, label in ((len(active), tr('files analysed')),
+                                             (len(sheets), tr('inventories')), (year_range, tr('file date range'))))
         registry = language_registry or LanguageRegistry.load()
         for message, languages in registry.notices({r.language for r in records}):
             cards += '<p class="note">' + _escape(tr(message, languages)) + '</p>'
-        quality = table([tr('Показник'), tr('Кількість')], [
-            (tr('Помилки'), counts["ERROR"]), (tr('Попередження'), counts["WARNING"]),
-            (tr('Порожні крайні дати'), sum(not r.dates_raw for r in active)),
-            (tr('Не визначено жодного року справи'), sum(r.start_year is None and r.end_year is None for r in active)),
-            (tr('Не визначено кількість аркушів'), sum(r.pages is None for r in active)),
-            (tr('Справи з позначками експертної перевірки'), sum(bool(r.review_flags) for r in active)),
-            (tr('Вибулі записи'), sum(r.status == "withdrawn" for r in records)),
+        quality = table([tr('Metric'), tr('Count')], [
+            (tr('Errors'), counts["ERROR"]), (tr('Warnings'), counts["WARNING"]),
+            (tr('Empty date fields'), sum(not r.dates_raw for r in active)),
+            (tr('No file year determined'), sum(r.start_year is None and r.end_year is None for r in active)),
+            (tr('No folio count determined'), sum(r.pages is None for r in active)),
+            (tr('Files flagged for expert review'), sum(bool(r.review_flags) for r in active)),
+            (tr('Withdrawn entries'), sum(r.status == "withdrawn" for r in records)),
         ])
-        coverage = table([tr('Стан класифікації'), tr('Справ'), tr('% усіх справ зрізу')], [
+        coverage = table([tr('Classification status'), tr('Files'), tr('% of all files in this scope')], [
             (label, value, percent(value)) for label, value in (
-                (tr('Тематично класифіковано'), subject), (tr('Лише контекст'), context),
-                (tr('Не класифіковано'), len(active) - subject - context))])
+                (tr('Subject assigned'), subject), (tr('Context only'), context),
+                (tr('Unclassified'), len(active) - subject - context))])
         descriptions = csv_table(tables / "description_summary.csv", root, [
-            ("description", tr('Архівний опис')), ("cases_in_analysis", tr('Справ')),
-            ("withdrawn_records", tr('Вибулих')), ("subject_classified", tr('Тематично класифіковано')),
-            ("context_only", tr('Лише контекст')), ("unclassified", tr('Не класифіковано'))])
+            ("description", tr('Inventory')), ("cases_in_analysis", tr('Files')),
+            ("withdrawn_records", tr('Withdrawn')), ("subject_classified", tr('Subject assigned')),
+            ("context_only", tr('Context only')), ("unclassified", tr('Unclassified'))])
         categories = csv_table(tables / "category_counts.csv", root, [
-            ("category_label", tr('Категорія')), ("cases", tr('Справ')),
-            ("percent_of_analyzed_titles", tr('% усіх справ зрізу'))])
+            ("category_label", tr('Category')), ("cases", tr('Files')),
+            ("percent_of_analyzed_titles", tr('% of all files in this scope'))])
         blocks = Counter(block for record in active for block in set(record.macroblocks))
-        block_table = table([tr('Тематичний блок'), tr('Справ'), tr('% усіх справ зрізу')],
+        block_table = table([tr('Thematic block'), tr('Files'), tr('% of all files in this scope')],
                              [(visual.label("macroblocks", key, label), blocks[key], percent(blocks[key]))
                               for key, label in macroblock_labels.items()])
-        chronology = csv_table(tables / "cases_by_decade.csv", root, [("decade", tr('Десятиліття')), ("cases", tr('Справ'))])
+        chronology = csv_table(tables / "cases_by_decade.csv", root, [("decade", tr('Decade')), ("cases", tr('Files'))])
         types = csv_table(tables / "document_type_counts.csv", root, [
-            ("document_type_label", tr('Тип документа')), ("titles", tr('Заголовків зі згадкою')),
-            ("percent_of_analyzed_titles", tr('% усіх справ зрізу'))])
+            ("document_type_label", tr('Document type')), ("titles", tr('Titles with a mention')),
+            ("percent_of_analyzed_titles", tr('% of all files in this scope'))])
         charts = []
         for stem, label in CHARTS.items():
             label = visual.text(label)
@@ -155,10 +156,10 @@ def write_html_report(
             if image:
                 charts.append(f'<figure><img loading="lazy" src="{_url(image, root)}" alt="{_escape(label)}">'
                               f'<figcaption>{_escape(label)}</figcaption></figure>')
-        chart_html = "".join(charts) or tr('<p class="muted">Статичні графіки не створено. Таблиці та інтерактивні звіти доступні нижче.</p>')
+        chart_html = "".join(charts) or tr('<p class="muted">Static charts were not generated. Tables and interactive reports are available below.</p>')
         interactive = "".join(f"<li>{_link(figures / name, root, visual.text(label))}</li>"
                               for name, label in INTERACTIVE.items() if (figures / name).is_file())
-        interactive = f'<ul class="interactive">{interactive}</ul>' if interactive else tr('<p>Інтерактивні звіти відсутні.</p>')
+        interactive = f'<ul class="interactive">{interactive}</ul>' if interactive else tr('<p>No interactive reports.</p>')
         report_files = files(reports.glob("*"), root)
         table_files = files(tables.glob("*.csv"), root)
         sections.append(tr('''<section id="{0}"><h2>{1}</h2>
@@ -179,6 +180,8 @@ def write_html_report(
 <p><a href="#top">До початку</a></p></section>''', anchor, _escape(title), _escape('; '.join(refs)), cards, descriptions, quality, report_files, coverage, categories, block_table, chronology, types, chart_html, interactive, table_files))
     exports = files((root / "thematic_exports").rglob("*"), root)
     general = files([root / "run_manifest.json", *(root / "tables").glob("*.csv")], root)
+    if manifest_path is not None and not manifest_path.is_file():
+        general += "<ul><li>" + _link(manifest_path, root, report=report) + "</li></ul>"
     page = tr('''<!doctype html>
 <html lang="uk"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Аналіз архівних описів — {0}</title>

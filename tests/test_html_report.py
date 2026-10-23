@@ -10,6 +10,7 @@ from urllib.parse import unquote
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from html_report import write_html_report
 from models import Issue, Record
+from localization import Visualization
 
 
 class Links(HTMLParser):
@@ -31,7 +32,7 @@ class HtmlReportTests(unittest.TestCase):
     def test_empty_report_has_no_broken_assets_or_nan(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            path = write_html_report(root, "Порожня.xlsx", {"combined": []}, [], "test", "test", {})
+            path = write_html_report(root, "Порожня.xlsx", {"combined": []}, [], "test", "test", {}, visual=Visualization("uk"))
             page = path.read_text()
             self.assertIn("Не визначено", page)
             self.assertIn("Статичні графіки не створено", page)
@@ -66,7 +67,7 @@ class HtmlReportTests(unittest.TestCase):
             record.categories = ["a"]
             page = write_html_report(root, '<script>alert(1)</script>.xlsx', {scope: [record]},
                                      [Issue("WARNING", 5, "1", "дата", "", "тест", "sheet")],
-                                     "test", "test", {}).read_text()
+                                     "test", "test", {}, visual=Visualization("uk")).read_text()
             self.assertIn("Показано 50 із 51 рядків", page)
             self.assertIn("&lt;опис 0&gt;", page)
             self.assertIn("&lt;архів&gt;", page)
