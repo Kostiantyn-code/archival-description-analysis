@@ -114,7 +114,7 @@ class MultiWorkbookTests(unittest.TestCase):
                 with patch.object(f, "configure_analysis", lambda _: None), \
                      patch.object(f, "load_dependencies", lambda: (openpyxl, yaml, None)), \
                      contextlib.redirect_stdout(io.StringIO()):
-                    with self.assertRaisesRegex(RuntimeError, "Частина книг"):
+                    with self.assertRaisesRegex(RuntimeError, "Some workbooks"):
                         f.main()
                 run = next(f.OUTPUTS_DIR.iterdir())
                 with (run / "run_summary.csv").open(encoding="utf-8-sig", newline="") as stream:
@@ -129,6 +129,7 @@ class MultiWorkbookTests(unittest.TestCase):
                 self.assertEqual(len(c_manifest["sources"]), 1)
                 for folder, manifest in (("A", a_manifest), ("C", c_manifest)):
                     self.assertTrue((run / folder / "report.html").is_file())
+                    self.assertIn('href="run_manifest.json"', (run / folder / "report.html").read_text())
                     self.assertIn("report.html", manifest["outputs"])
                     self.assertIn("html_report.py", manifest["sha256"])
                     self.assertIn("theme_links.py", manifest["sha256"])

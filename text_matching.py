@@ -1,4 +1,4 @@
-"""Нормалізація та зіставлення UK/RU без читання або зміни файлів."""
+"""Language-specific token matching, with no file reads or source-text edits."""
 from __future__ import annotations
 
 import re
@@ -8,7 +8,7 @@ from functools import lru_cache
 from typing import Any
 
 MATCH_LANGUAGE = ContextVar("match_language", default="uk")
-MATCHING_PROFILES = {"uk": "legacy_uk", "ru": "legacy_ru", "en": "unicode_exact", "hr": "unicode_exact", "it": "unicode_exact"}
+MATCHING_PROFILES = {"uk": "uk_light", "ru": "ru_light", "en": "unicode_exact", "hr": "unicode_exact", "it": "unicode_exact"}
 DETECTION_TERMS = {}
 
 
@@ -84,8 +84,7 @@ def tokenize(text: str) -> list[str]:
     if MATCHING_PROFILES.get(MATCH_LANGUAGE.get()) == "unicode_exact":
         return unicode_tokens(text)
     normalized = normalize_text(text)
-    # У джерелі складні слова інколи набрано з пробілами біля дефіса:
-    # «військово- морський». Для зіставлення це те саме складне слово.
+    # Treat spaces around a compound-word hyphen as the same spelling.
     normalized = re.sub(
         r"(?<=[A-Za-zА-Яа-яІіЇїЄєҐґЁё])\s*-\s*"
         r"(?=[A-Za-zА-Яа-яІіЇїЄєҐґЁё])",
@@ -240,7 +239,7 @@ def contains_item(tokens: list[str], item: str) -> bool:
 
 
 def item_matcher(tokens: list[str]):
-    """Індекс одного заголовка після маскування; кеш діє лише для цієї категорії."""
+    """Index one masked title; isolate cached matches to this category."""
     language = MATCH_LANGUAGE.get()
     words = {part for token in tokens for part in (token, *token.split("-"))}
     phrases: dict[int, set[tuple[str, ...]]] = {}
@@ -288,7 +287,7 @@ def normalize_case_id(value: str) -> str:
     return result
 
 
-# Легкий стемінг, НЕ повна лематизація. Мовні кеші ізольовано.
+# Light stemming, not lemmatization; caches are isolated by language.
 RU_ENDINGS = sorted({
     "иями", "иям", "ием", "ией", "ие", "ия", "ии", "ями", "ами", "ого", "ему", "ому", "ыми", "ими", "иях",
     "ов", "ев", "ей", "ам", "ям", "ах", "ях", "ом", "ем", "ий", "ый",
@@ -316,7 +315,7 @@ def russian_stem_word(word: str) -> str:
 
 
 def detect_title_language(title: str) -> str:
-    """Контрольна евристика; власні назви не змінюють налаштування аркуша."""
+    """Conservative heuristic; place names do not override the worksheet language."""
     tokens = tokenize(title)
     uk = sum(bool(re.search("[іїєґ]", w)) for w in tokens)
     ru = sum(bool(re.search("[ыэёъ]", w)) for w in tokens)

@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 import fond_analysis as analysis
-from document_types import match_document_types
+from mentions import match_document_types
 
 
 def ids(title):

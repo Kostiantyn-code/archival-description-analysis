@@ -1,4 +1,4 @@
-"""Записи опису, категорії та повідомлення перевірки."""
+"""Archival entries, classification categories and data-quality issues."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -25,14 +25,14 @@ class Category:
     label: str
     macroblock: str
     minimum_score: int
-    strong_phrases: list[str]
-    strong_terms: list[str]
-    context_only_phrases: list[str]
-    context_only_terms: list[str]
-    contextual_terms: list[str]
-    context_rules: list[dict[str, Any]]
-    exclude_phrases: list[str]
-    review_terms: list[str]
+    strong_phrases: list[str] = field(default_factory=list)
+    strong_terms: list[str] = field(default_factory=list)
+    context_only_phrases: list[str] = field(default_factory=list)
+    context_only_terms: list[str] = field(default_factory=list)
+    contextual_terms: list[str] = field(default_factory=list)
+    context_rules: list[dict[str, Any]] = field(default_factory=list)
+    exclude_phrases: list[str] = field(default_factory=list)
+    review_terms: list[str] = field(default_factory=list)
     export_filename: str = ""
     concepts: list[dict[str, Any]] = field(default_factory=list)
     concept_rules: list[dict[str, Any]] = field(default_factory=list)

@@ -21,17 +21,17 @@ import openpyxl
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import fond_analysis as f
-from geography_maps import write_maps
+from geography import write_maps
 from html_report import CHARTS, write_html_report
-from terminology import write_terminology_report, TERMS, GROUPS
+from mentions import write_terminology_report, TERMS, GROUPS
 from theme_links import write_theme_links
-from visualization import Visualization, english_catalog
+from localization import Visualization, english_catalog
 
 
 class VisualizationTests(unittest.TestCase):
     def test_defaults_validation_and_original_fallback(self):
         self.assertEqual(Visualization.from_config({}).metadata(),
-                         {"language": "uk", "bilingual_labels": False, "label_overrides": {}})
+                         {"language": "en", "bilingual_labels": False, "label_overrides": {}})
         for options in ({"language": "fr"}, {"bilingual_labels": "false"},
                         {"label_overrides": {"terms": []}}, None):
             with self.assertRaises(ValueError):
@@ -39,7 +39,7 @@ class VisualizationTests(unittest.TestCase):
         en = Visualization("en", True)
         self.assertEqual(en.label("categories", "education", "Освіта"), "Education (Освіта)")
         self.assertEqual(en.label("terms", "unknown", "Невідомий термін"), "Невідомий термін")
-        self.assertEqual(Visualization().label("categories", "education", "Освіта"), "Освіта")
+        self.assertEqual(Visualization("uk").label("categories", "education", "Освіта"), "Освіта")
 
     def test_overrides_and_archival_references(self):
         en = Visualization.from_config({"visualization": {
@@ -48,7 +48,7 @@ class VisualizationTests(unittest.TestCase):
                                 "terms": {"burgher": "Townsman"}}}})
         self.assertEqual(en.label("terms", "burgher", "Міщанин"), "Townsman (Міщанин)")
         self.assertEqual(en.description("sheet", "ДАМО, ф. 230: опис 1"),
-                         "State Archives of Mykolaiv Region (ДАМО), fond 230: inventory 1")
+                         "State Archives of Mykolaiv Region (ДАМО), fonds 230: inventory 1")
 
     def test_catalog_covers_identifiers_and_templates(self):
         catalog = english_catalog()
@@ -61,7 +61,7 @@ class VisualizationTests(unittest.TestCase):
         self.assertFalse({p.name for p in f.load_places()[1]} - catalog["places"].keys())
         for path in (ROOT / "maps").glob("*template.html"):
             source = path.read_text()
-            self.assertEqual(Visualization().template(source), source)
+            self.assertEqual(Visualization("uk").template(source), source)
             self.assertIsNone(re.search("[А-Яа-яІіЇїЄєҐґ]", Visualization("en").template(source)), path)
 
     def test_batch_passes_config_to_reports_and_manifest(self):
@@ -77,10 +77,8 @@ class VisualizationTests(unittest.TestCase):
                           "label_overrides": {"categories": {"education": "Education </script>"}}}}
             path = root / "analysis.yaml"
             path.write_text(yaml.safe_dump(config, allow_unicode=True))
-            original_config_path = f.config_path
-            def config_path(name, *args):
-                return path if name == "analysis.yaml" else original_config_path(name, *args)
-            with patch.object(f, "config_path", config_path), \
+            (root / "categories.yaml").write_bytes((ROOT/"config/categories.yaml").read_bytes())
+            with patch.object(f, "CONFIG_DIR", root), \
                  patch.object(f, "load_dependencies", lambda: (openpyxl, yaml, None)), \
                  patch.multiple(f, **{key: getattr(f, key) for key in (
                      "INPUT_DIR", "INPUT_FILE", "OUTPUTS_DIR", "ANALYSIS_CONFIG", "RUN_DIR",
@@ -91,7 +89,7 @@ class VisualizationTests(unittest.TestCase):
             folder = next((root / "outputs").glob("*/book"))
             manifest = json.loads((folder / "run_manifest.json").read_text())
             self.assertEqual(manifest["visualization"], config["visualization"])
-            self.assertIn("config/visualization.en.json", manifest["sha256"])
+            self.assertIn("config/localization.json", manifest["sha256"])
             scopes = [row["source"] for row in manifest["source_summary"]]
             self.assertIn("Theme links", (folder / "report.html").read_text())
             for scope in scopes:
@@ -126,7 +124,7 @@ class VisualizationTests(unittest.TestCase):
         colors = {s: c for s, c in zip(sheets, ["#225588", "#cc8833"])}
         snapshots, summaries, term_data, network_data = [], [], [], []
         with tempfile.TemporaryDirectory() as tmp:
-            for index, visual in enumerate([Visualization(), Visualization("en"), Visualization("en", True)]):
+            for index, visual in enumerate([Visualization("uk"), Visualization("en"), Visualization("en", True)]):
                 folder = Path(tmp) / str(index)
                 folder.mkdir()
                 with patch.object(f, "WORK_DIR", folder), patch.object(f, "FIGURES_DIR", folder), \
