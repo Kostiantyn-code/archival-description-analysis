@@ -1,0 +1,106 @@
+"""English reports preserve source text and analytical results."""
+import contextlib
+import csv
+import io
+import json
+from pathlib import Path
+import re
+import tempfile
+import unittest
+from unittest.mock import patch
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import openpyxl
+import yaml
+import fond_analysis as f
+from html_report import write_html_report
+from report_localization import Report
+from visualization import Visualization
+
+
+def make_input(path, language=None):
+    book = openpyxl.Workbook()
+    sheet = book.active
+    sheet.title = "Inventory 1"
+    sheet.append(["Архів", "Test archive", None, "Language" if language else None, language])
+    sheet.append(["Фонд", "230"])
+    sheet.append(["Опис", "1"])
+    sheet.append(["№", "Заголовок справи", "Крайні дати", "Кількість аркушів", "Примітки"])
+    sheet.append(["1", "Справа про відкриття школи", "1850", 2])
+    sheet.append(["2", "Справа про ремонт лікарні", "1851", "невідомо", "Немає даних для цього зрізу. <script>{0}</script>"])
+    book.save(path)
+    book.close()
+
+
+class EnglishReportTests(unittest.TestCase):
+    def test_placeholder_values_are_not_translated_or_reparsed(self):
+        report = Report(Visualization("en"))
+        raw = "Немає даних для цього зрізу. {1} <script>"
+        self.assertEqual(report.text("Файл: {0}", raw), "File: " + raw)
+        self.assertEqual(Report().text("Файл: {0}", raw), "Файл: " + raw)
+
+    def test_english_empty_page_and_table_limits(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            page = write_html_report(root, "Немає даних для цього зрізу..xlsx", {"combined": []}, [], "test", "test", {}, Visualization("en")).read_text()
+            self.assertIn('lang="en"', page)
+            self.assertIn("No data for this scope.", page)
+            self.assertIn("Немає даних для цього зрізу..xlsx", page)
+            self.assertNotIn("Якість даних", page)
+            self.assertIn("Data quality", page)
+
+    def test_bundle_localisation_does_not_change_classification_or_csv(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            source = base / "source.xlsx"
+            make_input(source)
+            categories, ambiguities, blocks, version = f.load_dictionaries(yaml)
+            old = {key: getattr(f, key) for key in ("INPUT_FILE", "RUN_DIR", "ANALYSIS_CONFIG", "REPORTS_DIR", "FIGURES_DIR", "WORK_DIR", "THEMATIC_DIR", "SHEET_NAMES", "SOURCE_CONFIG", "HEADER_ROWS_BY_SHEET")}
+            try:
+                for language in ("uk", "en"):
+                    f.INPUT_FILE = source
+                    f.RUN_DIR = base / language
+                    f.ANALYSIS_CONFIG = {"visualization": {"language": language}, "exports": {"enabled": False}}
+                    with contextlib.redirect_stdout(io.StringIO()):
+                        f.analyze_workbook(openpyxl, yaml, None, categories, ambiguities, blocks, version, "test")
+                uk = base / "uk"
+                en = base / "en"
+                for table in (uk / "tables").rglob("*.csv"):
+                    self.assertEqual(table.read_bytes(), (en / table.relative_to(uk)).read_bytes(), table.name)
+                markdown = (en / "reports/combined/analysis_report.md").read_text()
+                self.assertIn("## Corpus composition", markdown)
+                self.assertIn("Education", markdown)
+                self.assertNotRegex(markdown, "[А-Яа-яІіЇїЄєҐґ]")
+                page = (en / "report.html").read_text()
+                self.assertIn("Education", page)
+                self.assertNotRegex(page, "[А-Яа-яІіЇїЄєҐґ]")
+                log = (en / "reports/combined/error.log").read_text(encoding="utf-8-sig")
+                self.assertIn("The folio count could not be determined", log)
+                self.assertIn("невідомо", log)  # original problematic cell
+                manifest = json.loads((en / "run_manifest.json").read_text())
+                self.assertEqual(manifest["report_language"], "en")
+                self.assertIn("config/report.en.json", manifest["sha256"])
+            finally:
+                for key, value in old.items():
+                    setattr(f, key, value)
+
+    def test_declared_croatian_does_not_fall_back_to_ukrainian(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "croatian.xlsx"
+            make_input(path, "hr")
+            old = f.INPUT_FILE, f.SOURCE_CONFIG, f.SHEET_NAMES, f.HEADER_ROWS_BY_SHEET
+            try:
+                f.INPUT_FILE = path
+                f.configure_workbook_sources(openpyxl)
+                records, _, _ = f.read_records(openpyxl)
+                with contextlib.redirect_stdout(io.StringIO()):
+                    f.classify_records(records, [], [], [])
+                self.assertTrue(all(r.language == "hr" and r.language_source == "sheet_declared" for r in records))
+                self.assertTrue(all(not r.categories and "unsupported_language: hr" in r.review_flags for r in records))
+            finally:
+                f.INPUT_FILE, f.SOURCE_CONFIG, f.SHEET_NAMES, f.HEADER_ROWS_BY_SHEET = old
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -26,6 +26,7 @@ from theme_links import TEMPLATE as THEME_LINKS_TEMPLATE, write_theme_links
 from html_report import write_html_report
 from report_utils import write_csv
 from visualization import Visualization, CATALOG as VISUALIZATION_CATALOG
+from report_localization import Report, CATALOG as REPORT_CATALOG
 from text_matching import (
     MATCH_LANGUAGE,
     YEAR_HEADING_RE,
@@ -70,6 +71,10 @@ PERSONAL_SECTION_RE = re.compile(
     re.I,
 )
 LETTER_HEADING_RE = re.compile(r'^[«"“]?\s*[А-ЯЁІЇЄҐA-Z]\s*[»"”]?$', re.I)
+
+
+def tr(source: str, *values: str) -> str:
+    return Report(Visualization.from_config(ANALYSIS_CONFIG)).text(source, *values)
 
 
 def load_dependencies():
@@ -207,13 +212,19 @@ def configure_workbook_sources(openpyxl_module) -> None:
                     elif any(token in {"справа", "відомості", "щодо"} for token in tokens):
                         language_counts["uk"] += 1
             language = "ru" if language_counts["ru"] > language_counts["uk"] else "uk"
+            declared = clean_cell(rows[0][4]).casefold() if clean_cell(rows[0][3]).casefold() == "language" else ""
+            if declared:
+                if not re.fullmatch(r"[a-z]{2,3}", declared):
+                    raise ValueError(f"{INPUT_FILE.name}, {sheet.title}, E1: invalid language code")
+                language = declared
             header = [normalize_text(clean_cell(value)) for value in rows[3]]
             sources[sheet.title] = {
                 "source_id": source_keys[key], "archive": archive, "fond": fond,
                 "inventory": inventory, "language": language,
+                "language_source": "sheet_declared" if declared else "sheet_inferred",
                 "pages_expected": bool(header[3]),
                 "skip_header_checks": [index for index, value in enumerate(header, 1)
-                                       if (index == 5 and not value) or
+                                       if (index in {4, 5} and not value) or
                                        (index == 2 and re.search(r"\bф\.\s*\d", value))],
             }
             metadata_rows[sheet.title] = 4
@@ -394,8 +405,8 @@ def parse_years(
     if not dates_raw:
         issues.append(
             Issue(
-                "WARNING", row, case_id, "Крайні дати", "",
-                "Для справи не зазначено крайні дати.",
+                "WARNING", row, case_id, tr('Крайні дати'), "",
+                tr('Для справи не зазначено крайні дати.'),
                 sheet_name,
             )
         )
@@ -405,8 +416,8 @@ def parse_years(
     if long_numbers:
         issues.append(
             Issue(
-                "ERROR", row, case_id, "Крайні дати", dates_raw,
-                "Виявлено число з п'ятьма або більше цифрами: "
+                "ERROR", row, case_id, tr('Крайні дати'), dates_raw,
+                tr("Виявлено число з п'ятьма або більше цифрами: ")
                 + ", ".join(long_numbers),
                 sheet_name,
             )
@@ -416,8 +427,8 @@ def parse_years(
     if not years:
         issues.append(
             Issue(
-                "WARNING", row, case_id, "Крайні дати", dates_raw,
-                "Не вдалося розпізнати чотиризначний рік.",
+                "WARNING", row, case_id, tr('Крайні дати'), dates_raw,
+                tr('Не вдалося розпізнати чотиризначний рік.'),
                 sheet_name,
             )
         )
@@ -427,9 +438,8 @@ def parse_years(
         if year < MIN_ALLOWED_YEAR or year > MAX_ALLOWED_YEAR:
             issues.append(
                 Issue(
-                    "WARNING", row, case_id, "Крайні дати", dates_raw,
-                    f"Рік {year} виходить за контрольні межі "
-                    f"{MIN_ALLOWED_YEAR}–{MAX_ALLOWED_YEAR}.",
+                    "WARNING", row, case_id, tr('Крайні дати'), dates_raw,
+                    tr('Рік {0} виходить за контрольні межі {1}–{2}.', year, MIN_ALLOWED_YEAR, MAX_ALLOWED_YEAR),
                     sheet_name,
                 )
             )
@@ -439,8 +449,8 @@ def parse_years(
     if end_year < start_year:
         issues.append(
             Issue(
-                "ERROR", row, case_id, "Крайні дати", dates_raw,
-                f"Кінцевий рік {end_year} менший за початковий {start_year}.",
+                "ERROR", row, case_id, tr('Крайні дати'), dates_raw,
+                tr('Кінцевий рік {0} менший за початковий {1}.', end_year, start_year),
                 sheet_name,
             )
         )
@@ -457,8 +467,8 @@ def parse_pages(
     if not pages_raw:
         issues.append(
             Issue(
-                "WARNING", row, case_id, "Кількість аркушів", "",
-                "Не зазначено кількість аркушів.",
+                "WARNING", row, case_id, tr('Кількість аркушів'), "",
+                tr('Не зазначено кількість аркушів.'),
                 sheet_name,
             )
         )
@@ -470,8 +480,8 @@ def parse_pages(
         if pages <= 0:
             issues.append(
                 Issue(
-                    "WARNING", row, case_id, "Кількість аркушів", pages_raw,
-                    "Кількість аркушів має бути більшою за нуль.",
+                    "WARNING", row, case_id, tr('Кількість аркушів'), pages_raw,
+                    tr('Кількість аркушів має бути більшою за нуль.'),
                     sheet_name,
                 )
             )
@@ -482,8 +492,8 @@ def parse_pages(
     if len(numbers) == 1:
         issues.append(
             Issue(
-                "WARNING", row, case_id, "Кількість аркушів", pages_raw,
-                "Нетипове оформлення; використано знайдене числове значення.",
+                "WARNING", row, case_id, tr('Кількість аркушів'), pages_raw,
+                tr('Нетипове оформлення; використано знайдене числове значення.'),
                 sheet_name,
             )
         )
@@ -491,8 +501,8 @@ def parse_pages(
 
     issues.append(
         Issue(
-            "WARNING", row, case_id, "Кількість аркушів", pages_raw,
-            "Не вдалося однозначно визначити кількість аркушів.",
+            "WARNING", row, case_id, tr('Кількість аркушів'), pages_raw,
+            tr('Не вдалося однозначно визначити кількість аркушів.'),
             sheet_name,
         )
     )
@@ -544,9 +554,9 @@ def read_records(
             if expected not in actual_headers[column - 1]:
                 issues.append(
                     Issue(
-                        "WARNING", header_row, "", f"Колонка {column}",
+                        "WARNING", header_row, "", tr('Колонка {0}', column),
                         actual_headers[column - 1],
-                        f"Заголовок колонки не містить очікуваний текст «{expected}».",
+                        tr('Заголовок колонки не містить очікуваний текст «{0}».', expected),
                         sheet_name,
                     )
                 )
@@ -598,7 +608,7 @@ def read_records(
                 source_id=config.get("source_id", sheet_name),
                 language=config.get("language", "uk"),
                 detected_language=detect_title_language(title_raw),
-                language_source="sheet_inferred",
+                language_source=config.get("language_source", "sheet_inferred"),
             )
 
             if status == "case":
@@ -616,8 +626,8 @@ def read_records(
                 )
                 issues.append(
                     Issue(
-                        "ERROR", excel_row, case_id_raw, "Структура рядка", joined,
-                        "Рядок не вдалося віднести до відомого типу.",
+                        "ERROR", excel_row, case_id_raw, tr('Структура рядка'), joined,
+                        tr('Рядок не вдалося віднести до відомого типу.'),
                         sheet_name,
                     )
                 )
@@ -636,14 +646,14 @@ def read_records(
             continue
         rows = ", ".join(str(record.excel_row) for record in duplicated)
         titles = " || ".join(
-            f"рядок {record.excel_row}: {record.title_raw}"
+            tr("рядок {0}: {1}", record.excel_row, record.title_raw)
             for record in duplicated
         )
         issues.append(
             Issue(
                 "WARNING", duplicated[0].excel_row, duplicated[0].case_id_raw,
-                "Номер справи", normalized_id,
-                f"Номер повторюється у рядках {rows}. {titles}",
+                tr('Номер справи'), normalized_id,
+                tr('Номер повторюється у рядках {0}. {1}', rows, titles),
                 sheet_name,
             )
         )
@@ -817,6 +827,12 @@ def classify_records(
     print_classification_progress(0, total, started_at)
 
     for processed, record in enumerate(active_records, start=1):
+        if record.language not in {"uk", "ru"}:
+            # Do not silently apply a different language's dictionaries.
+            record.review_flags.append("unsupported_language: " + record.language)
+            if processed % update_every == 0 or processed == total:
+                print_classification_progress(processed, total, started_at, finished=processed == total)
+            continue
         (
             record.categories,
             record.category_labels,
@@ -1703,44 +1719,44 @@ def write_error_log(issues: list[Issue], records: list[Record]) -> None:
     warnings = [issue for issue in issues if issue.level == "WARNING"]
     statuses = Counter(record.status for record in records)
     lines = [
-        "ПЕРЕВІРКА АРХІВНОГО ОПИСУ",
-        f"Файл: {INPUT_FILE}",
-        "Опрацьовані аркуші: "
+        tr('ПЕРЕВІРКА АРХІВНОГО ОПИСУ'),
+        tr('Файл: {0}', INPUT_FILE),
+        tr('Опрацьовані аркуші: ')
         + ", ".join(sorted({record.sheet_name for record in records})),
-        f"Дата запуску: {datetime.now():%d.%m.%Y %H:%M:%S}",
+        tr('Дата запуску: {0}', f'{datetime.now():%d.%m.%Y %H:%M:%S}'),
         "",
-        "РЕЗЮМЕ",
-        f"Справи, включені до аналізу: {statuses['case']}",
-        f"Вибулі записи: {statuses['withdrawn']}",
-        f"Структурні заголовки років: {statuses['year_heading']}",
-        f"Загальні заголовки груп справ: {statuses['group_heading']}",
-        f"Записи архівного опису: {statuses['inventory']}",
-        f"Нерозпізнані рядки: {statuses['unknown']}",
-        f"Помилки: {len(errors)}",
-        f"Попередження: {len(warnings)}",
+        tr('РЕЗЮМЕ'),
+        tr('Справи, включені до аналізу: {0}', statuses['case']),
+        tr('Вибулі записи: {0}', statuses['withdrawn']),
+        tr('Структурні заголовки років: {0}', statuses['year_heading']),
+        tr('Загальні заголовки груп справ: {0}', statuses['group_heading']),
+        tr('Записи архівного опису: {0}', statuses['inventory']),
+        tr('Нерозпізнані рядки: {0}', statuses['unknown']),
+        tr('Помилки: {0}', len(errors)),
+        tr('Попередження: {0}', len(warnings)),
         "",
     ]
 
     number = 1
-    for heading, group in (("ПОМИЛКИ", errors), ("ПОПЕРЕДЖЕННЯ", warnings)):
+    for heading, group in ((tr('ПОМИЛКИ'), errors), (tr('ПОПЕРЕДЖЕННЯ'), warnings)):
         lines.extend([heading, ""])
         if not group:
-            lines.extend(["Не виявлено.", ""])
+            lines.extend([tr('Не виявлено.'), ""])
             continue
         for issue in group:
             location = []
             if issue.sheet_name:
-                location.append(f"аркуш «{issue.sheet_name}»")
+                location.append(tr('аркуш «{0}»', issue.sheet_name))
             if issue.row is not None:
-                location.append(f"рядок {issue.row}")
+                location.append(tr('рядок {0}', issue.row))
             if issue.case_id:
-                location.append(f"справа № {issue.case_id}")
+                location.append(tr('справа № {0}', issue.case_id))
             suffix = f" ({', '.join(location)})" if location else ""
             lines.append(f"{number}. {issue.message}{suffix}")
             if issue.field:
-                lines.append(f"   Поле: {issue.field}")
+                lines.append(tr('   Поле: {0}', issue.field))
             if issue.value:
-                lines.append(f"   Значення: {one_line(issue.value)}")
+                lines.append(tr('   Значення: {0}', one_line(issue.value)))
             lines.append("")
             number += 1
 
@@ -1758,6 +1774,7 @@ def write_analysis_report(
     figures_created: bool,
     dictionary_version: str,
 ) -> None:
+    visual = Visualization.from_config(ANALYSIS_CONFIG)
     active = table_data["active"]
     unclassified = table_data["unclassified"]
     context_only = table_data["context_only"]
@@ -1784,252 +1801,200 @@ def write_analysis_report(
         return f"{value / total * 100:.2f}%" if total else "0.00%"
 
     lines = [
-        "# Результати аналізу архівних описів",
+        tr('# Результати аналізу архівних описів'),
         "",
-        f"Дата запуску: {datetime.now():%d.%m.%Y %H:%M:%S}.",
-        f"Версія скрипта: `{SCRIPT_VERSION}`. Версія словників: "
-        f"`{dictionary_version}`.",
-        "Опрацьовані аркуші: "
+        tr('Дата запуску: {0}.', f'{datetime.now():%d.%m.%Y %H:%M:%S}'),
+        tr('Версія скрипта: `{0}`. Версія словників: `{1}`.', SCRIPT_VERSION, dictionary_version),
+        tr('Опрацьовані аркуші: ')
         + ", ".join(sorted({record.sheet_name for record in records})) + ".",
         "",
-        "## Склад масиву",
+        tr('## Склад масиву'),
         "",
-        "| Показник | Значення |",
+        tr('| Показник | Значення |'),
         "|---|---:|",
-        f"| Заголовки справ, включені до аналізу | {format_count(len(active))} |",
-        f"| Вибулі записи | {format_count(status_counts['withdrawn'])} |",
-        f"| Заголовки років | {format_count(status_counts['year_heading'])} |",
-        f"| Загальні заголовки груп справ | "
-        f"{format_count(status_counts['group_heading'])} |",
-        f"| Записи про архівний опис | {format_count(status_counts['inventory'])} |",
-        f"| Нерозпізнані рядки | {format_count(status_counts['unknown'])} |",
-        f"| Помилки | {format_count(error_count)} |",
-        f"| Попередження | {format_count(warning_count)} |",
+        tr('| Заголовки справ, включені до аналізу | {0} |', format_count(len(active))),
+        tr('| Вибулі записи | {0} |', format_count(status_counts['withdrawn'])),
+        tr('| Заголовки років | {0} |', format_count(status_counts['year_heading'])),
+        tr('| Загальні заголовки груп справ | {0} |', format_count(status_counts['group_heading'])),
+        tr('| Записи про архівний опис | {0} |', format_count(status_counts['inventory'])),
+        tr('| Нерозпізнані рядки | {0} |', format_count(status_counts['unknown'])),
+        tr('| Помилки | {0} |', format_count(error_count)),
+        tr('| Попередження | {0} |', format_count(warning_count)),
         "",
-        "## Розподіл за архівними описами",
+        tr('## Розподіл за архівними описами'),
         "",
-        "| Архівний опис | Справ у аналізі | Вибулі | Предметну тему визначено | Лише контекст | Не визначено |",
+        tr('| Архівний опис | Справ у аналізі | Вибулі | Предметну тему визначено | Лише контекст | Не визначено |'),
         "|---|---:|---:|---:|---:|---:|",
     ]
     for row in table_data["description_rows"]:
         lines.append(
-            f"| {row['description']} | {format_count(row['cases_in_analysis'])} | "
+            f"| {visual.description(row['sheet_name'], row['description'])} | {format_count(row['cases_in_analysis'])} | "
             f"{format_count(row['withdrawn_records'])} | "
             f"{format_count(row['subject_classified'])} | "
             f"{format_count(row['context_only'])} | "
             f"{format_count(row['unclassified'])} |"
         )
 
+    unsupported = sorted({r.language for r in records if r.language not in {"uk", "ru"}})
+    if unsupported:
+        lines.extend(["", tr(
+            'Для мов {0} тематичні словники відсутні. Класифікацію пропущено; нульове покриття не характеризує зміст документів.',
+            ', '.join(unsupported)), ""])
+
     lines.extend(
         [
         "",
-        "## Хронологічні й кількісні показники",
+        tr('## Хронологічні й кількісні показники'),
         "",
-        f"- Розпізнаний діапазон років: "
-        f"{min(years) if years else '—'}–{max(years) if years else '—'}.",
-        f"- Справ із розпізнаною кількістю аркушів: {format_count(len(pages))}.",
-        f"- Сума аркушів лише за заповненими числовими значеннями: {format_count(sum(pages))}.",
-        f"- Заголовків без заповненого поля дат: {sum(not r.dates_raw for r in active)}.",
-        f"- Заголовків без розпізнаної кількості аркушів: {len(active)-len(pages)}.",
-        "- Хронологія: початковий рік із поля дат; за його відсутності — рік групового заголовка. Це різні підстави, позначені в records.csv та chronology_sources.csv; рік групи не є крайньою датою справи. Зворотні діапазони та роки поза контрольними межами не включені до хронологічних графіків.",
+        tr('- Розпізнаний діапазон років: {0}–{1}.', min(years) if years else '—', max(years) if years else '—'),
+        tr('- Справ із розпізнаною кількістю аркушів: {0}.', format_count(len(pages))),
+        tr('- Сума аркушів лише за заповненими числовими значеннями: {0}.', format_count(sum(pages))),
+        tr('- Заголовків без заповненого поля дат: {0}.', sum((not r.dates_raw for r in active))),
+        tr('- Заголовків без розпізнаної кількості аркушів: {0}.', len(active) - len(pages)),
+        tr('- Хронологія: початковий рік із поля дат; за його відсутності — рік групового заголовка. Це різні підстави, позначені в records.csv та chronology_sources.csv; рік групи не є крайньою датою справи. Зворотні діапазони та роки поза контрольними межами не включені до хронологічних графіків.'),
         (
-            f"- Середня кількість аркушів: {statistics.mean(pages):.2f}."
-            if pages else "- Середня кількість аркушів: —."
+            tr('- Середня кількість аркушів: {0}.', f'{statistics.mean(pages):.2f}')
+            if pages else tr('- Середня кількість аркушів: —.')
         ),
         (
-            f"- Медіанна кількість аркушів: {statistics.median(pages):.2f}."
-            if pages else "- Медіанна кількість аркушів: —."
+            tr('- Медіанна кількість аркушів: {0}.', f'{statistics.median(pages):.2f}')
+            if pages else tr('- Медіанна кількість аркушів: —.')
         ),
         "",
-        "## Покриття тематичною класифікацією",
+        tr('## Покриття тематичною класифікацією'),
         "",
-        f"- Предметну тематику визначено: {format_count(len(classified))} "
-        f"({percent(len(classified), len(active))}).",
-        f"- Визначено лише контекст осіб або установ: "
-        f"{format_count(len(context_only))} "
-        f"({percent(len(context_only), len(active))}).",
-        f"- Не визначено ні тему, ні контекст: {format_count(len(unclassified))} "
-        f"({percent(len(unclassified), len(active))}).",
-        f"- Належить до кількох категорій: {format_count(len(multilabel))} "
-        f"({percent(len(multilabel), len(active))}).",
-        f"- Позначено для контекстної перевірки: {format_count(len(needs_review))}.",
-        f"- Виявлено окремі контекстні згадки осіб або установ: "
-        f"{format_count(len(context_mentions))} "
-        f"({percent(len(context_mentions), len(active))}).",
+        tr('- Предметну тематику визначено: {0} ({1}).', format_count(len(classified)), percent(len(classified), len(active))),
+        tr('- Визначено лише контекст осіб або установ: {0} ({1}).', format_count(len(context_only)), percent(len(context_only), len(active))),
+        tr('- Не визначено ні тему, ні контекст: {0} ({1}).', format_count(len(unclassified)), percent(len(unclassified), len(active))),
+        tr('- Належить до кількох категорій: {0} ({1}).', format_count(len(multilabel)), percent(len(multilabel), len(active))),
+        tr('- Позначено для контекстної перевірки: {0}.', format_count(len(needs_review))),
+        tr('- Виявлено окремі контекстні згадки осіб або установ: {0} ({1}).', format_count(len(context_mentions)), percent(len(context_mentions), len(active))),
         "",
-        "## Тематичні категорії",
+        tr('## Тематичні категорії'),
         "",
-        "| Категорія | Справ | Частка справ, включених до аналізу |",
+        tr('| Категорія | Справ | Частка справ, включених до аналізу |'),
         "|---|---:|---:|",
         ]
     )
     for category_id, count in category_counts.most_common():
         lines.append(
-            f"| {category_by_id[category_id].label} | "
+            f"| {visual.label("categories", category_id, category_by_id[category_id].label)} | "
             f"{format_count(count)} | {percent(count, len(active))} |"
         )
 
     lines.extend(
         [
             "",
-            "Сума часток може перевищувати 100%, оскільки одна справа може належати "
-            "до кількох категорій.",
+            tr('Сума часток може перевищувати 100%, оскільки одна справа може належати до кількох категорій.'),
             "",
-            "## Макроблоки дисертації",
+            tr('## Макроблоки дисертації'),
             "",
-            "| Макроблок | Справ | Частка справ, включених до аналізу |",
+            tr('| Макроблок | Справ | Частка справ, включених до аналізу |'),
             "|---|---:|---:|",
         ]
     )
     for macroblock, count in macroblock_counts.most_common():
         lines.append(
-            f"| {macroblock_labels.get(macroblock, macroblock)} | "
+            f"| {visual.label("macroblocks", macroblock, macroblock_labels.get(macroblock, macroblock))} | "
             f"{format_count(count)} | {percent(count, len(active))} |"
         )
 
     document_type_counts = table_data["document_type_counts"]
     lines.extend([
         "",
-        "## Згадки типів документів у заголовках",
+        tr('## Згадки типів документів у заголовках'),
         "",
-        f"Версія словника форм документів: `{DOCUMENT_TYPE_RULES_VERSION}`. "
-        "Класифікація багатозначна: в одному заголовку може бути названо "
-        "кілька форм документів. Результат позначає лише згадку в заголовку, "
-        "а не підтверджує склад самої справи. Формули «справа про» та «дело о» "
-        "не вважаються видами документів.",
+        tr('Версія словника форм документів: `{0}`. Класифікація багатозначна: в одному заголовку може бути названо кілька форм документів. Результат позначає лише згадку в заголовку, а не підтверджує склад самої справи. Формули «справа про» та «дело о» не вважаються видами документів.', DOCUMENT_TYPE_RULES_VERSION),
         "",
-        f"- Принаймні одну згадку знайдено: "
-        f"{format_count(table_data['document_type_matched'])} "
-        f"({percent(table_data['document_type_matched'], len(active))}).",
-        f"- Кілька типів у заголовку: "
-        f"{format_count(table_data['document_type_multi'])} "
-        f"({percent(table_data['document_type_multi'], len(active))}).",
+        tr('- Принаймні одну згадку знайдено: {0} ({1}).', format_count(table_data['document_type_matched']), percent(table_data['document_type_matched'], len(active))),
+        tr('- Кілька типів у заголовку: {0} ({1}).', format_count(table_data['document_type_multi']), percent(table_data['document_type_multi'], len(active))),
         "",
-        "| Тип документа | Заголовків | Частка заголовків |",
+        tr('| Тип документа | Заголовків | Частка заголовків |'),
         "|---|---:|---:|",
     ])
     document_type_labels = {document_type.id: document_type.label
                             for document_type in DOCUMENT_TYPES}
     for document_type_id, count in document_type_counts.most_common():
         lines.append(
-            f"| {document_type_labels[document_type_id]} | "
+            f"| {visual.label("document_types", document_type_id, document_type_labels[document_type_id])} | "
             f"{format_count(count)} | {percent(count, len(active))} |"
         )
 
     geography = table_data["geography"]
     lines.extend([
-        "", "## Географічні згадки в заголовках", "",
-        f"Версія географічного словника: `{load_places()[0]}`. Знайдено "
-        f"{format_count(len(geography['rows']))} пар «справа — населений пункт» "
-        f"у {format_count(geography['matched_cases'])} заголовках "
-        f"({percent(geography['matched_cases'], len(active))}). "
-        "Одна справа може згадувати кілька місць. Координати позначають "
-        "приблизний сучасний центр міста, а не місце події. Назви установ "
-        "та адміністративні прикметники без явної назви населеного пункту "
-        "не вважаються географічним доказом.",
+        "", tr('## Географічні згадки в заголовках'), "",
+        tr('Версія географічного словника: `{0}`. Знайдено {1} пар «справа — населений пункт» у {2} заголовках ({3}). Одна справа може згадувати кілька місць. Координати позначають приблизний сучасний центр міста, а не місце події. Назви установ та адміністративні прикметники без явної назви населеного пункту не вважаються географічним доказом.', load_places()[0], format_count(len(geography['rows'])), format_count(geography['matched_cases']), percent(geography['matched_cases'], len(active))),
         "",
-        f"Назв із явним географічним префіксом, не зіставлених зі словником: "
-        f"{format_count(geography['unmapped_candidates'])}; "
-        "перевіряйте `geography_unmapped_candidates.csv` перед доповненням словника.",
-        "", "| Населений пункт | Згадок |", "|---|---:|",
+        tr('Назв із явним географічним префіксом, не зіставлених зі словником: {0}; перевіряйте `geography_unmapped_candidates.csv` перед доповненням словника.', format_count(geography['unmapped_candidates'])),
+        "", tr('| Населений пункт | Згадок |'), "|---|---:|",
     ])
     for place, count in geography["totals"].most_common(20):
-        lines.append(f"| {place} | {format_count(count)} |")
+        lines.append(f'| {visual.label("places", place, place)} | {format_count(count)} |')
 
     terminology = table_data["terminology"]
     lines.extend([
-        "", "## Еволюція термінології та ідеологем", "",
-        f"Версія лексичних правил: `{TERMINOLOGY_RULES_VERSION}`. Знайдено "
-        f"{format_count(terminology['matches'])} пар «термін — заголовок» "
-        f"у {format_count(terminology['titles'])} заголовках корпусу; "
-        f"датовано {format_count(terminology['dated_titles'])} заголовків. "
-        "Кількість збігів може перевищувати кількість справ: одному заголовку "
-        "можна надати кілька термінів. Графіки показують згадки в архівних "
-        "заголовках, а не поширеність ідей або подій в історичному суспільстві. "
-        "Порівнюйте частоти на 1 000 заголовків окремо за описами. "
-        "Інтерактивний звіт: `figures/terminology_evolution.html`.",
+        "", tr('## Еволюція термінології та ідеологем'), "",
+        tr('Версія лексичних правил: `{0}`. Знайдено {1} пар «термін — заголовок» у {2} заголовках корпусу; датовано {3} заголовків. Кількість збігів може перевищувати кількість справ: одному заголовку можна надати кілька термінів. Графіки показують згадки в архівних заголовках, а не поширеність ідей або подій в історичному суспільстві. Порівнюйте частоти на 1 000 заголовків окремо за описами. Інтерактивний звіт: `figures/terminology_evolution.html`.', TERMINOLOGY_RULES_VERSION, format_count(terminology['matches']), format_count(terminology['titles']), format_count(terminology['dated_titles'])),
     ])
 
     theme_links = table_data["theme_links"]
     lines.extend([
-        "", "## Зв’язки між темами справ / Мережа співкласифікації справ", "",
-        f"{format_count(theme_links['multi'])} із {format_count(theme_links['titles'])} "
-        "заголовків справ мають щонайменше дві предметні теми. "
-        f"Виявлено {format_count(theme_links['category_pairs'])} пар тем. "
-        "Спільна справа може утворювати кілька пар. Для аналізу окремих "
-        "описів відкрийте `figures/theme_links.html`; повні підрахунки містить "
-        "`tables/theme_links_by_description.csv`, а перелік справ для "
-        "кожної пари — `tables/theme_link_cases.csv`. Контекстні згадки "
-        "не утворюють тематичних зв’язків.",
+        "", tr('## Зв’язки між темами справ / Мережа співкласифікації справ'), "",
+        tr('{0} із {1} заголовків справ мають щонайменше дві предметні теми. Виявлено {2} пар тем. Спільна справа може утворювати кілька пар. Для аналізу окремих описів відкрийте `figures/theme_links.html`; повні підрахунки містить `tables/theme_links_by_description.csv`, а перелік справ для кожної пари — `tables/theme_link_cases.csv`. Контекстні згадки не утворюють тематичних зв’язків.', format_count(theme_links['multi']), format_count(theme_links['titles']), format_count(theme_links['category_pairs'])),
     ])
 
     lines.extend(
         [
             "",
-            "## Створені матеріали",
+            tr('## Створені матеріали'),
             "",
-            "- reports/error.log — перелік помилок і попереджень;",
-            "- tables/records.csv — усі розпізнані рядки;",
-            "- tables/description_summary.csv — контрольні підсумки за кожним "
-            "архівним описом;",
-            "- tables/unclassified_cases.csv — справи без теми та контексту;",
-            "- tables/topic_unclassified_cases.csv — усі справи без предметної теми, включно з контекстними;",
-            "- tables/context_only_cases.csv — справи, для яких визначено лише "
-            "контекст осіб або установ;",
-            "- tables/needs_review.csv — справи з неоднозначними термінами;",
-            "- tables/context_mentions.csv — згадки осіб та установ, які самі "
-            "по собі не визначають тему;",
-            "- tables/category_counts.csv — кількість справ за категоріями;",
-            "- tables/context_category_counts.csv — кількість контекстних "
-            "згадок за категоріями;",
-            "- tables/cases_by_decade.csv — хронологічний розподіл;",
-            "- tables/cases_by_year.csv — річний розподіл окремо за описами;",
-            "- tables/themes_by_decade.csv — динаміка тем за десятиліттями;",
-            "- tables/document_type_index.csv — згадки типів документів у кожному заголовку й вирази, що спричинили збіг;",
-            "- tables/document_type_counts.csv — підсумок згадок за типами;",
-            "- tables/document_types_by_description.csv — типи документів за архівними описами;",
-            "- tables/geography_mentions.csv — кожна згадка населеного пункту, координати й заголовок справи;",
-            "- tables/geography_by_description.csv — згадки за описами, включно з нульовими значеннями;",
-            "- tables/geography_by_decade.csv — згадки за десятиліттями та описами;",
-            "- tables/geography_unmapped_candidates.csv — географічні назви, які варто перевірити й додати до словника;",
-            "- figures/geography_south.html, geography_europe.html, geography_russia.html — окремі інтерактивні ракурси тієї самої карти;",
-            "- tables/term_mentions.csv — заголовки, шифри справ та точні форми термінів;",
-            "- tables/terms_by_decade_and_description.csv — частоти на 1 000 заголовків за десятиліттями й описами;",
-            "- figures/terminology_evolution.html — інтерактивний звіт про лексику заголовків;",
-            "- tables/theme_links_by_description.csv — зв’язки тем і блоків за описами;",
-            "- tables/theme_link_cases.csv — справи, які утворюють кожну пару тем або блоків;",
-            "- figures/theme_links.html — інтерактивна мережа співкласифікації справ;",
-            "- thematic_exports/ — похідні XLSX/CSV-вибірки за всіма "
-            "увімкненими категоріями, а також некласифіковані та службові записи.",
+            tr('- reports/error.log — перелік помилок і попереджень;'),
+            tr('- tables/records.csv — усі розпізнані рядки;'),
+            tr('- tables/description_summary.csv — контрольні підсумки за кожним архівним описом;'),
+            tr('- tables/unclassified_cases.csv — справи без теми та контексту;'),
+            tr('- tables/topic_unclassified_cases.csv — усі справи без предметної теми, включно з контекстними;'),
+            tr('- tables/context_only_cases.csv — справи, для яких визначено лише контекст осіб або установ;'),
+            tr('- tables/needs_review.csv — справи з неоднозначними термінами;'),
+            tr('- tables/context_mentions.csv — згадки осіб та установ, які самі по собі не визначають тему;'),
+            tr('- tables/category_counts.csv — кількість справ за категоріями;'),
+            tr('- tables/context_category_counts.csv — кількість контекстних згадок за категоріями;'),
+            tr('- tables/cases_by_decade.csv — хронологічний розподіл;'),
+            tr('- tables/cases_by_year.csv — річний розподіл окремо за описами;'),
+            tr('- tables/themes_by_decade.csv — динаміка тем за десятиліттями;'),
+            tr('- tables/document_type_index.csv — згадки типів документів у кожному заголовку й вирази, що спричинили збіг;'),
+            tr('- tables/document_type_counts.csv — підсумок згадок за типами;'),
+            tr('- tables/document_types_by_description.csv — типи документів за архівними описами;'),
+            tr('- tables/geography_mentions.csv — кожна згадка населеного пункту, координати й заголовок справи;'),
+            tr('- tables/geography_by_description.csv — згадки за описами, включно з нульовими значеннями;'),
+            tr('- tables/geography_by_decade.csv — згадки за десятиліттями та описами;'),
+            tr('- tables/geography_unmapped_candidates.csv — географічні назви, які варто перевірити й додати до словника;'),
+            tr('- figures/geography_south.html, geography_europe.html, geography_russia.html — окремі інтерактивні ракурси тієї самої карти;'),
+            tr('- tables/term_mentions.csv — заголовки, шифри справ та точні форми термінів;'),
+            tr('- tables/terms_by_decade_and_description.csv — частоти на 1 000 заголовків за десятиліттями й описами;'),
+            tr('- figures/terminology_evolution.html — інтерактивний звіт про лексику заголовків;'),
+            tr('- tables/theme_links_by_description.csv — зв’язки тем і блоків за описами;'),
+            tr('- tables/theme_link_cases.csv — справи, які утворюють кожну пару тем або блоків;'),
+            tr('- figures/theme_links.html — інтерактивна мережа співкласифікації справ;'),
+            tr('- thematic_exports/ — похідні XLSX/CSV-вибірки за всіма увімкненими категоріями, а також некласифіковані та службові записи.'),
         ]
     )
     if figures_created:
-        lines.append("- figures/ — графіки у форматах PNG і SVG.")
+        lines.append(tr('- figures/ — графіки у форматах PNG і SVG.'))
     else:
         lines.extend(
             [
                 "",
-                "> Графіки не створено, оскільки бібліотеку matplotlib "
-                "не встановлено. Решта аналізу виконана.",
+                tr('> Графіки не створено, оскільки бібліотеку matplotlib не встановлено. Решта аналізу виконана.'),
             ]
         )
     lines.extend(
         [
             "",
-            "## Методичне застереження",
+            tr('## Методичне застереження'),
             "",
-            f"Це автоматизована класифікація за словниками версії {dictionary_version}. "
-            "Тематичні категорії описують предмет справи; назви установ, "
-            "посади та станові означення, які лише називають учасника або "
-            "автора документа, винесено в окремі контекстні мітки. "
-            "Перед використанням числових результатів у дисертації потрібно "
-            "перевірити needs_review.csv та unclassified_cases.csv, "
-            "після чого скоригувати словники.",
+            tr('Це автоматизована класифікація за словниками версії {0}. Тематичні категорії описують предмет справи; назви установ, посади та станові означення, які лише називають учасника або автора документа, винесено в окремі контекстні мітки. Перед використанням числових результатів у дисертації потрібно перевірити needs_review.csv та unclassified_cases.csv, після чого скоригувати словники.', dictionary_version),
             "",
-            "Тематичні XLSX-файли є похідними дослідницькими вибірками, "
-            "а не новими архівними описами. Первинним джерелом залишається "
-            "input.xlsx. Одна справа може бути представлена у кількох файлах, "
-            "оскільки класифікація є багатозначною.",
+            tr('Тематичні XLSX-файли є похідними дослідницькими вибірками, а не новими архівними описами. Первинним джерелом залишається input.xlsx. Одна справа може бути представлена у кількох файлах, оскільки класифікація є багатозначною.'),
         ]
     )
     (REPORTS_DIR / "analysis_report.md").write_text(
@@ -2501,8 +2466,8 @@ def analyze_workbook(openpyxl_module, yaml_module, plt, categories, ambiguities,
         subset = [r for r in records if r.source_id == source and r.status == "case"]
         missing_pages = sum(not r.pages_raw for r in subset)
         if subset and missing_pages and not SOURCE_CONFIG[subset[0].sheet_name].get("pages_expected", True):
-            issues.append(Issue("WARNING", None, "", "Кількість аркушів", str(missing_pages),
-                                f"{source}: кількість аркушів не заповнено у {missing_pages} заголовках; зведене попередження.", subset[0].sheet_name))
+            issues.append(Issue("WARNING", None, "", tr('Кількість аркушів'), str(missing_pages),
+                                tr('{0}: кількість аркушів не заповнено у {1} заголовках; зведене попередження.', source, missing_pages), subset[0].sheet_name))
     print(f"   Розпізнано рядків: {len(records)}")
 
     print("3. Тематична класифікація...")
@@ -2568,6 +2533,7 @@ def analyze_workbook(openpyxl_module, yaml_module, plt, categories, ambiguities,
          BASE_DIR / "geography_maps.py", BASE_DIR / "terminology.py",
          BASE_DIR / "theme_links.py", BASE_DIR / "html_report.py",
          BASE_DIR / "report_utils.py", BASE_DIR / "visualization.py",
+         BASE_DIR / "report_localization.py", REPORT_CATALOG,
          VISUALIZATION_CATALOG, THEME_LINKS_TEMPLATE,
          GEOGRAPHY_BASEMAP, GEOGRAPHY_TEMPLATE, TERMINOLOGY_TEMPLATE]
         + sorted(CONFIG_DIR.glob("*.yaml"))
@@ -2586,6 +2552,7 @@ def analyze_workbook(openpyxl_module, yaml_module, plt, categories, ambiguities,
         "openpyxl": openpyxl_module.__version__,
         "pyyaml": yaml_module.__version__,
         "visualization": visual.metadata(),
+        "report_language": visual.language,
         "configured_sheets": list(SHEET_NAMES),
         "sources": SOURCE_CONFIG,
         "header_rows": HEADER_ROWS_BY_SHEET,
