@@ -23,57 +23,20 @@ import fond_analysis as f
 
 def evaluate():
     registry = LanguageRegistry.load()
-    index = yaml.safe_load((ROOT / "config/categories.yaml").read_text())
+    index = yaml.safe_load((ROOT / "config/categories.yaml").read_text(encoding="utf-8"))
     languages = [
         code
         for code, pack in registry.languages.items()
         if pack["vocabulary"] == "reference"
     ]
     ordered = ["en", *sorted(code for code in languages if code != "en")]
-    aliases = {}
-    labels = {}
     for code in ordered:
-        _, content = registry.compile(code, index)
-        aliases[code] = (
-            {c["id"]: c["terms"] for c in content["concepts"]}
-            if code == "en"
-            else content["concepts"]
-        )
-        labels[code] = (
-            {c["id"]: c["label_en"] for c in content["concepts"]}
-            if code == "en"
-            else {
-                cid: (terms[0] if terms else "")
-                for cid, terms in content["concepts"].items()
-            }
-        )
-    columns = [
-        "concept_id",
-        "category",
-        "role",
-        "udc_codes",
-        "udc_relation",
-        "scope_note",
-        *[f"label_{c}" for c in ordered],
-        *[f"terms_{c}" for c in ordered],
-    ]
+        registry.compile(code, index)
+    alignment = list(registry.alignment_rows())
     stream = io.StringIO(newline="")
-    writer = csv.DictWriter(stream, fieldnames=columns, lineterminator="\n")
+    writer = csv.DictWriter(stream, fieldnames=list(alignment[0]), lineterminator="\n")
     writer.writeheader()
-    for concept in registry.reference["concepts"]:
-        cid = concept["id"]
-        writer.writerow(
-            {
-                "concept_id": cid,
-                "category": concept["category"],
-                "role": concept["kind"],
-                "udc_codes": " | ".join(concept["udc_codes"]),
-                "udc_relation": concept["udc_relation"],
-                "scope_note": concept["scope_note"],
-                **{f"label_{c}": labels[c][cid] for c in ordered},
-                **{f"terms_{c}": " | ".join(aliases[c][cid]) for c in ordered},
-            }
-        )
+    writer.writerows(alignment)
     # Load production dictionaries and exercise separately authored contrast cases.
     f.ANALYSIS_CONFIG = {}
     f.LANGUAGE_CATEGORIES.clear()
@@ -83,7 +46,7 @@ def evaluate():
         f.LANGUAGE_CATEGORIES[code] = cats
         f.LANGUAGE_AMBIGUITIES[code] = amb
     cases = yaml.safe_load(
-        (ROOT / "tests/fixtures/multilingual_cases.yaml").read_text()
+        (ROOT / "tests/fixtures/multilingual_cases.yaml").read_text(encoding="utf-8")
     )
     failures = []
     for case in cases:
@@ -126,7 +89,7 @@ def evaluate():
         "status": "passed" if not failures else "failed",
         "validation_scope": "Structural checks and developer-authored synthetic contrasts; no independent linguistic or corpus accuracy validation.",
         "sha256": {
-            str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest()
+            p.relative_to(ROOT).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
             for p in sorted(set(inputs))
         },
     }

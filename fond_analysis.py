@@ -18,10 +18,10 @@ from textwrap import fill
 from typing import Any, Iterable
 
 
-from models import Issue, Category, Record, CATEGORY_RULE_FIELDS
+from models import Issue, Category, ConceptMatch, Record, CATEGORY_RULE_FIELDS
 from mentions import (
     DOCUMENT_TYPES, DOCUMENT_TYPE_RULES_VERSION, match_document_types,
-    RULES_VERSION as TERMINOLOGY_RULES_VERSION, write_terminology_report,
+    RULES_VERSION as TERMINOLOGY_RULES_VERSION, match_terms, write_terminology_report,
 )
 from geography import (
     GAZETTEER, find_places, load_places, unknown_candidates,
@@ -30,8 +30,13 @@ from geography import (
 from theme_links import write_theme_links
 from html_report import write_html_report
 from report_utils import write_csv
+from udc_report import write_udc_tables
 from localization import Visualization, Report, CATALOG as PRESENTATION_CATALOG
-from language_packs import LanguageRegistry, REGISTRY as LANGUAGE_REGISTRY, evaluate_concepts, pack_content, lexical_patterns, structural_patterns, personal_section_matches
+from language_packs import (
+    LanguageRegistry, REGISTRY as LANGUAGE_REGISTRY, cached_registry,
+    evaluate_concepts, pack_content, lexical_patterns, structural_patterns,
+    personal_section_matches,
+)
 from text_matching import (
     MATCH_LANGUAGE,
     YEAR_HEADING_RE,
@@ -85,7 +90,7 @@ def tr(source: str, *values: Any) -> str:
 
 @lru_cache(maxsize=1)
 def analysis_languages() -> LanguageRegistry:
-    registry = LanguageRegistry.load(LANGUAGE_REGISTRY)
+    registry = cached_registry(LANGUAGE_REGISTRY)
     configure_matching_profiles({code: pack["matching"] for code, pack in registry.languages.items()},
                                 {code: pack.get("detection_terms", []) for code, pack in registry.languages.items()})
     return registry
@@ -134,6 +139,7 @@ def configure_analysis(yaml_module) -> None:
         raise ValueError("Unsupported analysis settings: " + ", ".join(sorted(unknown_options)))
     ANALYSIS_CONFIG = config
     analysis_languages.cache_clear()
+    cached_registry.cache_clear()
     registry = analysis_languages()
     LANGUAGE_CATEGORIES.clear()
     LANGUAGE_AMBIGUITIES.clear()
@@ -224,7 +230,9 @@ def configure_workbook_sources(openpyxl_module) -> None:
             if key not in source_keys:
                 safe_fond = re.sub(r"[^a-z0-9_-]+", "_", fond.casefold()).strip("_")
                 safe_fond = safe_fond[:30] or "unnumbered"
-                source_keys[key] = f"fond_{safe_fond}_{hashlib.sha1(archive.casefold().encode('utf-8')).hexdigest()[:6]}"
+                key_bytes = json.dumps(key, ensure_ascii=False).encode("utf-8")
+                digest = hashlib.sha256(key_bytes).hexdigest()[:16]
+                source_keys[key] = f"fond_{safe_fond}_{digest}"
             language_counts = Counter()
             for row in sheet.iter_rows(min_row=5, max_row=104, min_col=2, max_col=2, values_only=True):
                 title_language = detect_title_language(clean_cell(row[0]))
@@ -665,6 +673,9 @@ def classify_title(
     ambiguities: list[dict[str, Any]],
     macroblock_order: list[str],
     language: str = "uk",
+    *,
+    subject_matches: dict[str, list[ConceptMatch]] | None = None,
+    context_matches: dict[str, list[ConceptMatch]] | None = None,
 ):
     if language not in {"uk", "ru"} and language not in LANGUAGE_CATEGORIES:
         import yaml
@@ -675,13 +686,14 @@ def classify_title(
     try:
         return _classify_title(
             title, categories if language == "uk" else LANGUAGE_CATEGORIES.get(language, categories),
-            ambiguities if language == "uk" else LANGUAGE_AMBIGUITIES.get(language, ambiguities), macroblock_order
+            ambiguities if language == "uk" else LANGUAGE_AMBIGUITIES.get(language, ambiguities),
+            macroblock_order, subject_matches, context_matches,
         )
     finally:
         MATCH_LANGUAGE.reset(token)
 
 
-def _classify_title(title, categories, ambiguities, macroblock_order):
+def _classify_title(title, categories, ambiguities, macroblock_order, subject_matches, context_matches):
     original_tokens = stem_tokens(title)
     matched_ids: list[str] = []
     matched_labels: list[str] = []
@@ -691,16 +703,20 @@ def _classify_title(title, categories, ambiguities, macroblock_order):
     context_labels: list[str] = []
     context_evidence: dict[str, list[str]] = {}
     review_flags: set[str] = set()
+    matchers = {}
 
     for category in categories:
         tokens = global_masks_for_category(original_tokens, category.id, ambiguities)
         for phrase in category.exclude_phrases:
             tokens = mask_item(tokens, phrase)
 
-        matches = item_matcher(tokens)
+        token_key = tuple(tokens)
+        if token_key not in matchers:
+            matchers[token_key] = item_matcher(tokens)
+        matches = matchers[token_key]
         concept_score, concept_evidence, concept_context = evaluate_concepts(
             matches, category.concepts, category.concept_rules, category.id)
-        category_context_evidence: list[str] = list(concept_context)
+        category_context_evidence = [match.evidence() for match in concept_context]
         for items, label in (
             (category.context_only_phrases, "phrase"),
             (category.context_only_terms, "term"),
@@ -713,9 +729,11 @@ def _classify_title(title, categories, ambiguities, macroblock_order):
             context_ids.append(category.id)
             context_labels.append(category.label)
             context_evidence[category.id] = category_context_evidence
+            if context_matches is not None and concept_context:
+                context_matches[category.id] = concept_context
 
         score = concept_score
-        category_evidence: list[str] = list(concept_evidence)
+        category_evidence = [match.evidence() for match in concept_evidence]
         for items, weight, label in (
             (category.strong_phrases, 4, "phrase"),
             (category.strong_terms, 3, "term"),
@@ -761,6 +779,8 @@ def _classify_title(title, categories, ambiguities, macroblock_order):
             matched_labels.append(category.label)
             scores[category.id] = score
             evidence[category.id] = category_evidence
+            if subject_matches is not None and concept_evidence:
+                subject_matches[category.id] = concept_evidence
         elif score >= max(1, category.minimum_score - 1):
             for review_term in category.review_terms:
                 if matches(review_term):
@@ -806,6 +826,9 @@ def classify_records(
 
     supported_languages = set(analysis_languages().languages)
     for processed, record in enumerate(active_records, start=1):
+        record.subject_matches.clear()
+        record.context_matches.clear()
+        record.inherited_categories.clear()
         if record.language not in supported_languages:
             # Do not silently apply a different language's dictionaries.
             record.review_flags.append("unsupported_language: " + record.language)
@@ -824,22 +847,32 @@ def classify_records(
             record.review_flags,
         ) = classify_title(
             record.title_raw, categories, ambiguities, macroblock_order,
-            language=record.language
+            language=record.language, subject_matches=record.subject_matches,
+            context_matches=record.context_matches,
         )
         if record.thematic_section:
             section_key = (record.language, record.thematic_section)
             if section_key not in section_results:
-                section_results[section_key] = classify_title(
+                section_matches = {}
+                section_ids, section_labels, _, section_scores, section_evidence, *_ = classify_title(
                     record.thematic_section, categories, ambiguities,
-                    macroblock_order, language=record.language,
+                    macroblock_order, language=record.language, subject_matches=section_matches,
                 )
-            section_ids, section_labels, _, section_scores, _, _, _, _, _ = section_results[section_key]
+                section_results[section_key] = (
+                    section_ids, section_labels, section_scores, section_matches, section_evidence,
+                )
+            section_ids, section_labels, section_scores, section_matches, section_evidence = section_results[section_key]
             for category_id, label in zip(section_ids, section_labels):
                 if category_id not in record.categories:
                     record.categories.append(category_id)
                     record.category_labels.append(label)
                     record.scores[category_id] = section_scores[category_id]
                     record.evidence[category_id] = [f"inventory_section: {record.thematic_section}"]
+                    record.inherited_categories.add(category_id)
+                    if category_id in section_matches:
+                        record.subject_matches[category_id] = section_matches[category_id]
+                    else:
+                        record.evidence[category_id].extend(section_evidence[category_id])
             ordered = sorted(
                 zip(record.categories, record.category_labels),
                 key=lambda pair: (-record.scores[pair[0]], pair[1]),
@@ -969,7 +1002,8 @@ def classification_index_row(record: Record) -> dict[str, Any]:
 
 
 def write_combined_indexes(
-    records: list[Record], categories: list[Category], tables_dir: Path
+    records: list[Record], categories: list[Category], tables_dir: Path,
+    category_rows=None,
 ) -> None:
     cases = [record for record in records if record.status == "case"]
     unclassified = [record for record in cases if not record.categories]
@@ -1018,54 +1052,52 @@ def write_combined_indexes(
         ),
     )
 
-    counts = Counter(
-        category_id for record in cases for category_id in record.categories
-    )
+    if category_rows is None:
+        _, category_rows = thematic_category_rows(cases, categories)
     write_csv(
         tables_dir / "thematic_summary.csv",
         [
             "category_id", "category_label", "macroblock", "export_file",
-            "cases", "percent_of_analyzed_titles",
+            *THEMATIC_COUNT_FIELDS,
         ],
         (
-            {
-                "category_id": category.id,
-                "category_label": category.label,
-                "macroblock": category.macroblock,
-                "export_file": category.export_filename,
-                "cases": counts[category.id],
-                "percent_of_analyzed_titles": (
-                    f"{counts[category.id] / len(cases) * 100:.2f}"
-                    if cases else "0.00"
-                ),
-            }
-            for category in categories
+            {**row, "export_file": category.export_filename}
+            for category, row in zip(categories, category_rows)
         ),
     )
 
 
-def copy_cell(source_cell, target_cell) -> None:
+def copy_cell(source_cell, target_cell, styles) -> None:
     target_cell.value = source_cell.value
-    # Style indices belong to the source workbook; copy individual properties.
-    target_cell.font = copy(source_cell.font)
-    target_cell.fill = copy(source_cell.fill)
-    target_cell.border = copy(source_cell.border)
-    target_cell.alignment = copy(source_cell.alignment)
-    target_cell.number_format = source_cell.number_format
-    target_cell.protection = copy(source_cell.protection)
-    target_cell.quotePrefix = source_cell.quotePrefix
+    target_cell.data_type = source_cell.data_type
+    style_id = source_cell.style_id
+    if style_id not in styles:
+        # Register each source style in this output workbook once.
+        target_cell.font = copy(source_cell.font)
+        target_cell.fill = copy(source_cell.fill)
+        target_cell.border = copy(source_cell.border)
+        target_cell.alignment = copy(source_cell.alignment)
+        target_cell.number_format = source_cell.number_format
+        target_cell.protection = copy(source_cell.protection)
+        target_cell.quotePrefix = source_cell.quotePrefix
+        target_cell.pivotButton = source_cell.pivotButton
+        styles[style_id] = target_cell._style
+    else:
+        target_cell._style = copy(styles[style_id])
     if source_cell.hyperlink:
         target_cell._hyperlink = copy(source_cell.hyperlink)
+        target_cell._hyperlink.ref = target_cell.coordinate
     if source_cell.comment:
         target_cell.comment = copy(source_cell.comment)
 
 
 def copy_source_row(source_sheet, target_sheet, source_row: int,
-                    target_row: int, max_columns: int) -> None:
+                    target_row: int, max_columns: int, styles) -> None:
     for column in range(1, max_columns + 1):
         copy_cell(
             source_sheet.cell(source_row, column),
             target_sheet.cell(target_row, column),
+            styles,
         )
     source_dimension = source_sheet.row_dimensions[source_row]
     target_dimension = target_sheet.row_dimensions[target_row]
@@ -1087,6 +1119,7 @@ def create_filtered_workbook(
 ) -> None:
     workbook = openpyxl_module.Workbook()
     workbook.remove(workbook.active)
+    styles = {}
     by_sheet: dict[str, list[Record]] = defaultdict(list)
     for record in records:
         by_sheet[record.sheet_name].append(record)
@@ -1100,7 +1133,7 @@ def create_filtered_workbook(
         )
         if source_sheet is not None:
             for row_number in range(1, header_row + 1):
-                copy_source_row(source_sheet, target_sheet, row_number, row_number, max_columns)
+                copy_source_row(source_sheet, target_sheet, row_number, row_number, max_columns, styles)
             for column in range(1, max_columns + 1):
                 letter = openpyxl_module.utils.get_column_letter(column)
                 source_dimension = source_sheet.column_dimensions[letter]
@@ -1137,7 +1170,7 @@ def create_filtered_workbook(
             if source_sheet is not None:
                 copy_source_row(
                     source_sheet, target_sheet, record.excel_row,
-                    target_row, max_columns,
+                    target_row, max_columns, styles,
                 )
             else:
                 values = [
@@ -1357,15 +1390,22 @@ def build_yearly_description_counts(
     return components, years, counts
 
 
-def create_geography_tables(active: list[Record], ordered_sheets: list[str]) -> dict[str, Any]:
+def match_geography(title, language):
+    found = find_places(title, language=language)
+    return found, unknown_candidates(title, found, language)
+
+
+def create_geography_tables(active: list[Record], ordered_sheets: list[str],
+                            place_matcher=None) -> dict[str, Any]:
     _, places = load_places()
+    place_matcher = place_matcher or match_geography
     rows = []
     missing = []
     totals: Counter[str] = Counter()
     by_description: Counter[tuple[str, str]] = Counter()
     by_decade: Counter[tuple[str, str, str]] = Counter()
     for record in active:
-        found = find_places(record.title_raw, places, record.language)
+        found, candidates = place_matcher(record.title_raw, record.language)
         decade = get_decade(record)
         for place, expression in found:
             row = {
@@ -1380,7 +1420,7 @@ def create_geography_tables(active: list[Record], ordered_sheets: list[str]) -> 
             totals[place.name] += 1
             by_description[place.name, record.sheet_name] += 1
             by_decade[place.name, str(row["decade"]), record.sheet_name] += 1
-        for candidate in unknown_candidates(record.title_raw, found, record.language):
+        for candidate in candidates:
             missing.append({
                 "record_uid": record.record_uid,
                 "sheet_name": record.sheet_name, "case_id": record.case_id_normalized,
@@ -1409,7 +1449,35 @@ def create_geography_tables(active: list[Record], ordered_sheets: list[str]) -> 
             "unmapped_candidates": len(missing)}
 
 
-def create_service_tables(records: list[Record], categories: list[Category]):
+THEMATIC_COUNT_FIELDS = [
+    "cases", "percent_of_analyzed_titles", "total_titles", "eligible_titles",
+    "skipped_language_titles", "percent_of_eligible_titles",
+]
+
+
+def thematic_category_rows(active, categories):
+    counts = Counter(category_id for record in active for category_id in record.categories)
+    supported = analysis_languages().languages
+    eligible = sum(record.language in supported for record in active)
+    total = len(active)
+    return counts, [
+        {
+            "category_id": category.id,
+            "category_label": category.label,
+            "macroblock": category.macroblock,
+            "cases": counts[category.id],
+            "percent_of_analyzed_titles": f"{counts[category.id] / total * 100:.2f}" if total else "0.00",
+            "total_titles": total,
+            "eligible_titles": eligible,
+            "skipped_language_titles": total - eligible,
+            "percent_of_eligible_titles": f"{counts[category.id] / eligible * 100:.2f}" if eligible else "",
+        }
+        for category in categories
+    ]
+
+
+def create_service_tables(records: list[Record], categories: list[Category], *,
+                          document_matcher=match_document_types, place_matcher=None):
     record_fields = [
         "record_uid", "source_archive", "source_fond", "source_inventory", "source_id",
         "language", "detected_language", "language_source", "title_normalized",
@@ -1483,29 +1551,14 @@ def create_service_tables(records: list[Record], categories: list[Category]):
         description_rows,
     )
 
-    category_counts = Counter(
-        category_id for record in active for category_id in record.categories
-    )
+    category_counts, category_rows = thematic_category_rows(active, categories)
     category_by_id = {category.id: category for category in categories}
     write_csv(
         WORK_DIR / "category_counts.csv",
         [
-            "category_id", "category_label", "macroblock", "cases",
-            "percent_of_analyzed_titles",
+            "category_id", "category_label", "macroblock", *THEMATIC_COUNT_FIELDS,
         ],
-        (
-            {
-                "category_id": category.id,
-                "category_label": category.label,
-                "macroblock": category.macroblock,
-                "cases": category_counts[category.id],
-                "percent_of_analyzed_titles": (
-                    f"{category_counts[category.id] / len(active) * 100:.2f}"
-                    if active else "0.00"
-                ),
-            }
-            for category in categories
-        ),
+        category_rows,
     )
 
     context_counts = Counter(
@@ -1600,7 +1653,7 @@ def create_service_tables(records: list[Record], categories: list[Category]):
     document_type_index: list[dict[str, Any]] = []
     document_type_multi = 0
     for record in active:
-        matches = match_document_types(normalize_text(record.title_raw), record.language)
+        matches = document_matcher(normalize_text(record.title_raw), record.language)
         ids = [document_type.id for document_type, _ in matches]
         document_type_counts.update(ids)
         document_type_by_sheet[record.sheet_name].update(ids)
@@ -1660,7 +1713,7 @@ def create_service_tables(records: list[Record], categories: list[Category]):
           )}
          for sheet_name in ordered_sheets for document_type in DOCUMENT_TYPES),
     )
-    geography = create_geography_tables(active, ordered_sheets)
+    geography = create_geography_tables(active, ordered_sheets, place_matcher)
     return {
         "active": active,
         "topic_unclassified": topic_unclassified,
@@ -1669,6 +1722,7 @@ def create_service_tables(records: list[Record], categories: list[Category]):
         "needs_review": needs_review,
         "context_mentions": context_mentions,
         "category_counts": category_counts,
+        "category_rows": category_rows,
         "context_counts": context_counts,
         "decade_counts": decade_counts,
         "year_components": year_components,
@@ -1811,7 +1865,7 @@ def write_analysis_report(
             f"{format_count(row['unclassified'])} |"
         )
 
-    registry = LanguageRegistry.load()
+    registry = analysis_languages()
     for message, languages in registry.notices({r.language for r in records}):
         lines.extend(["", tr(message, languages), ""])
 
@@ -2432,8 +2486,11 @@ def analyze_workbook(openpyxl_module, yaml_module, plt, categories, ambiguities,
 
     print(tr('2. Reading and checking the workbook...'))
     records, issues, _headers = read_records(openpyxl_module)
-    for source in sorted({r.source_id for r in records}):
-        subset = [r for r in records if r.source_id == source and r.status == "case"]
+    records_by_source = defaultdict(list)
+    for record in records:
+        records_by_source[record.source_id].append(record)
+    for source, source_records in records_by_source.items():
+        subset = [r for r in source_records if r.status == "case"]
         missing_pages = sum(not r.pages_raw for r in subset)
         if subset and missing_pages and not SOURCE_CONFIG[subset[0].sheet_name].get("pages_expected", True):
             issues.append(Issue("WARNING", None, "", tr('Folio count'), str(missing_pages),
@@ -2445,17 +2502,24 @@ def analyze_workbook(openpyxl_module, yaml_module, plt, categories, ambiguities,
     classify_records(records, categories, ambiguities, macroblock_order)
 
     roots = REPORTS_DIR, FIGURES_DIR, WORK_DIR
-    scopes = {source: [r for r in records if r.source_id == source]
-              for source in sorted({r.source_id for r in records})}
+    scopes = dict(sorted(records_by_source.items()))
     scopes["combined"] = records
+    # Each title contributes both to its fonds and to the workbook as a whole.
+    # Keep lexical lookups local to this workbook and reuse them in both scopes.
+    document_matcher = lru_cache(maxsize=None)(match_document_types)
+    place_matcher = lru_cache(maxsize=None)(match_geography)
+    term_matcher = lru_cache(maxsize=None)(match_terms)
     summary_rows = []
+    supported = analysis_languages().languages
     for scope, subset in scopes.items():
         print(tr('4–7. Tables, charts and report: {0}...', scope), flush=True)
         REPORTS_DIR, FIGURES_DIR, WORK_DIR = [p / scope for p in roots]
         ensure_directories()
         sheets = {r.sheet_name for r in subset}
         scoped_issues = [i for i in issues if i.sheet_name in sheets or not i.sheet_name] if scope != "combined" else issues
-        table_data = create_service_tables(subset, categories)
+        table_data = create_service_tables(
+            subset, categories, document_matcher=document_matcher, place_matcher=place_matcher,
+        )
         sheets_for_map = chart_sheet_order(subset)
         labels = {sheet: configured_description_label(sheet) for sheet in sheets_for_map}
         colors = chart_sheet_colors(sheets_for_map)
@@ -2467,6 +2531,7 @@ def analyze_workbook(openpyxl_module, yaml_module, plt, categories, ambiguities,
             WORK_DIR, FIGURES_DIR,
             scope_title,
             visual=visual,
+            term_matcher=term_matcher,
         )
         table_data["theme_links"] = write_theme_links(
             table_data["active"], sheets_for_map,
@@ -2487,7 +2552,10 @@ def analyze_workbook(openpyxl_module, yaml_module, plt, categories, ambiguities,
         write_analysis_report(subset, scoped_issues, categories, macroblock_labels,
                               table_data, figures_created, dictionary_version)
         cases = table_data["active"]
+        eligible = sum(r.language in supported for r in cases)
         summary_rows.append({"source": scope, "titles": len(cases),
+                             "eligible_titles": eligible,
+                             "skipped_language_titles": len(cases) - eligible,
                              "subject": sum(bool(r.categories) for r in cases),
                              "context_only": len(table_data["context_only"]),
                              "no_evidence": len(table_data["unclassified"]),
@@ -2495,7 +2563,9 @@ def analyze_workbook(openpyxl_module, yaml_module, plt, categories, ambiguities,
                              "missing_pages": sum(r.pages is None for r in cases)})
     write_csv(roots[2] / "source_summary.csv", list(summary_rows[0]), summary_rows)
     print(tr('8. Exporting thematic XLSX/CSV selections...'), flush=True)
-    write_combined_indexes(records, categories, roots[2])
+    write_combined_indexes(records, categories, roots[2], table_data["category_rows"])
+    registry = analysis_languages()
+    write_udc_tables(roots[2], records, registry)
     export_manifest = export_thematic_selections(
         openpyxl_module, records, categories
     )
@@ -2519,7 +2589,13 @@ def analyze_workbook(openpyxl_module, yaml_module, plt, categories, ambiguities,
         "pyyaml": yaml_module.__version__,
         "visualization": visual.metadata(),
         "report_language": visual.language,
-        "analysis_languages": {code: analysis_languages().metadata(code) for code in sorted({r.language for r in records})},
+        "analysis_languages": {code: registry.metadata(code) for code in sorted({r.language for r in records})},
+        "udc_alignment": {
+            "reference_version": registry.reference["version"],
+            "provenance": registry.reference.get("provenance", {}),
+            "vocabulary_table": "tables/vocabulary_alignment.csv",
+            "evidence_table": "tables/thematic_evidence.csv",
+        },
         "configured_sheets": list(SHEET_NAMES),
         "sources": SOURCE_CONFIG,
         "header_rows": HEADER_ROWS_BY_SHEET,
@@ -2527,7 +2603,7 @@ def analyze_workbook(openpyxl_module, yaml_module, plt, categories, ambiguities,
         "source_summary": summary_rows,
         "thematic_exports": export_manifest,
         "sha256": {
-            str(path.relative_to(BASE_DIR) if path.is_relative_to(BASE_DIR) else path): hashlib.sha256(
+            (path.relative_to(BASE_DIR) if path.is_relative_to(BASE_DIR) else path).as_posix(): hashlib.sha256(
                 path.read_bytes()
             ).hexdigest()
             for path in tracked
@@ -2535,7 +2611,7 @@ def analyze_workbook(openpyxl_module, yaml_module, plt, categories, ambiguities,
     }
     write_html_report(RUN_DIR, INPUT_FILE.name, scopes, issues,
                       SCRIPT_VERSION, dictionary_version, macroblock_labels, visual=visual,
-                      language_registry=analysis_languages(),
+                      language_registry=registry,
                       manifest_path=RUN_DIR / "run_manifest.json")
     manifest["outputs"] = sorted(path.relative_to(RUN_DIR).as_posix()
                                  for path in RUN_DIR.rglob("*") if path.is_file())

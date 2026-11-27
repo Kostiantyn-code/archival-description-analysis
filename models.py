@@ -38,6 +38,19 @@ class Category:
     concept_rules: list[dict[str, Any]] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class ConceptMatch:
+    matches: dict[str, list[str]]
+    rule_id: str = ""
+
+    def evidence(self) -> str:
+        if self.rule_id:
+            terms = "; ".join(f"{key}={' | '.join(forms)}" for key, forms in self.matches.items())
+            return f"concept_rule:{self.rule_id}: {terms}"
+        key, forms = next(iter(self.matches.items()))
+        return f"concept:{key}: {' | '.join(forms)}"
+
+
 @dataclass
 class Record:
     excel_row: int
@@ -71,6 +84,9 @@ class Record:
     context_category_labels: list[str] = field(default_factory=list)
     context_evidence: dict[str, list[str]] = field(default_factory=dict)
     review_flags: list[str] = field(default_factory=list)
+    subject_matches: dict[str, list[ConceptMatch]] = field(default_factory=dict)
+    context_matches: dict[str, list[ConceptMatch]] = field(default_factory=dict)
+    inherited_categories: set[str] = field(default_factory=set)
 
     @property
     def record_uid(self) -> str:

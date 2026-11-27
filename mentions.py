@@ -294,6 +294,8 @@ def write_terminology_report(
     figures_dir: Path,
     scope: str,
     visual: Visualization | None = None,
+    *,
+    term_matcher=match_terms,
 ) -> dict[str, int]:
     """Write exact counts and an offline interactive report for one workbook scope."""
     visual = visual or Visualization()
@@ -305,7 +307,7 @@ def write_terminology_report(
         if decade is not None:
             denominators["all", decade] += 1
             denominators[record.sheet_name, decade] += 1
-        for term_id, matched_form in match_terms(record.title_raw, record.language):
+        for term_id, matched_form in term_matcher(record.title_raw, record.language):
             term = next(item for item in TERMS if item[0] == term_id)
             index.append(
                 {
