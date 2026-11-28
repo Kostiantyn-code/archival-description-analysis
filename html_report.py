@@ -4,13 +4,13 @@ from __future__ import annotations
 import csv
 import html
 from collections import Counter
-from functools import partial
+from dataclasses import replace
+from functools import lru_cache, partial
 from pathlib import Path
 from urllib.parse import quote
 
 from models import Issue, Record
-from localization import Visualization
-from localization import Report
+from localization import REPORT_LANGUAGES, Report, Visualization
 from language_packs import LanguageRegistry
 
 
@@ -54,10 +54,9 @@ def _table(headers, rows, tr=Report().text) -> str:
     return f'<div class="table-wrap"><table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table></div>'
 
 
-def _csv_table(path: Path, root: Path, columns, limit: int = 50, report: Report = Report()) -> str:
-    tr = report.text
+def _csv_preview(path: Path, limit: int):
     if not path.is_file():
-        return tr('<p class="muted">The table was not generated.</p>')
+        return None
     # Keep the HTML bounded even for large source collections.
     rows = []
     count = 0
@@ -65,7 +64,18 @@ def _csv_table(path: Path, root: Path, columns, limit: int = 50, report: Report 
         for row in csv.DictReader(stream, delimiter=";"):
             count += 1
             if len(rows) < limit:
-                rows.append([report.csv_value(row, key) for key, _ in columns])
+                rows.append(row)
+    return rows, count
+
+
+def _csv_table(path: Path, root: Path, columns, limit: int = 50, *,
+               report: Report, preview) -> str:
+    tr = report.text
+    result = preview(path, limit)
+    if result is None:
+        return tr('<p class="muted">The table was not generated.</p>')
+    raw_rows, count = result
+    rows = [[report.csv_value(row, key) for key, _ in columns] for row in raw_rows]
     note = tr('Showing {0} of {1} rows. ', len(rows), count) if count > limit else ""
     return (_table([label for _, label in columns], rows, tr=tr)
             + f'<p class="muted">{note}{_link(path, root, tr('Full CSV table'))}</p>')
@@ -77,6 +87,32 @@ def _files(paths, root: Path, report: Report = Report()) -> str:
     return f"<ul>{links}</ul>" if links else tr('<p class="muted">No files.</p>')
 
 
+def html_report_paths(visual: Visualization) -> dict[str, str]:
+    return {code: "report.html" if code == visual.language else f"report.{code}.html"
+            for code in visual.report_languages()}
+
+
+FLAGS = {
+    "uk": '<path fill="#005bbb" d="M0 0h24v8H0z"/><path fill="#ffd500" d="M0 8h24v8H0z"/>',
+    "en": '<path fill="#012169" d="M0 0h24v16H0z"/><path d="m0 0 24 16M24 0 0 16" stroke="#fff" stroke-width="4"/><path d="m0 0 24 16M24 0 0 16" stroke="#c8102e" stroke-width="1.4"/><path d="M12 0v16M0 8h24" stroke="#fff" stroke-width="6"/><path d="M12 0v16M0 8h24" stroke="#c8102e" stroke-width="3.5"/>',
+    "hr": '<path fill="#ff0000" d="M0 0h24v5.33H0z"/><path fill="#fff" d="M0 5.33h24v5.34H0z"/><path fill="#171796" d="M0 10.67h24V16H0z"/><path fill="#fff" d="M9 5h6v4.5c0 1.5-1.5 2.5-3 3-1.5-.5-3-1.5-3-3z"/><path fill="#f00" d="M9 5h2v2H9zm4 0h2v2h-2zm-2 2h2v2h-2zM9 9h2v2h-1zm4 0h2l-1 2h-1zm-2 2h2v1h-2z"/><path fill="#46a1e3" d="M9 4h1V3h1v1h2V3h1v1h1v1H9z"/>',
+    "it": '<path fill="#009246" d="M0 0h8v16H0z"/><path fill="#fff" d="M8 0h8v16H8z"/><path fill="#ce2b37" d="M16 0h8v16h-8z"/>',
+    "ru": '<path fill="#fff" d="M0 0h24v5.33H0z"/><path fill="#0039a6" d="M0 5.33h24v5.34H0z"/><path fill="#d52b1e" d="M0 10.67h24V16H0z"/>',
+}
+
+
+def _language_switch(paths, visual, tr) -> str:
+    if len(paths) < 2:
+        return ""
+    links = []
+    for code, path in paths.items():
+        name = REPORT_LANGUAGES[code]
+        current = ' aria-current="page"' if code == visual.language else ""
+        flag = f'<svg viewBox="0 0 24 16" aria-hidden="true" focusable="false">{FLAGS[code]}</svg>'
+        links.append(f'<a href="{path}" hreflang="{code}" lang="{code}"{current}>{flag}{_escape(name)}</a>')
+    return f'<nav class="languages" aria-label="{_escape(tr("Report language"))}">{"".join(links)}</nav>'
+
+
 def write_html_report(
     root: Path, workbook_name: str, scopes: dict[str, list[Record]],
     issues: list[Issue], script_version: str, dictionary_version: str,
@@ -85,14 +121,50 @@ def write_html_report(
     language_registry: LanguageRegistry | None = None,
     manifest_path: Path | None = None,
 ) -> Path:
-    """Write one report per workbook; combined is not added to fond totals."""
-    visual = visual or Visualization()
+    """Write language views of one workbook using shared results and CSV previews."""
+    visual = visual or Visualization.from_config({})
+    paths = html_report_paths(visual)
+    registry = language_registry or LanguageRegistry.load()
+    preview = lru_cache(maxsize=None)(_csv_preview)
+    prepared = {}
+    for scope, records in scopes.items():
+        active = [record for record in records if record.status == "case"]
+        sheets = {record.sheet_name for record in records}
+        years = [year for record in active for year in (record.start_year, record.end_year)
+                 if year is not None]
+        prepared[scope] = {
+            "files": len(active),
+            "inventories": len(sheets),
+            "range": f"{min(years)}–{max(years)}" if years else "",
+            "refs": {(r.source_archive, r.source_fond) for r in records},
+            "issues": Counter(issue.level for issue in issues
+                              if scope == "combined" or not issue.sheet_name or issue.sheet_name in sheets),
+            "notices": list(registry.notices({r.language for r in records})),
+            "subject": sum(bool(r.categories) for r in active),
+            "context": sum(not r.categories and bool(r.context_categories) for r in active),
+            "skipped": sum(r.language not in registry.languages for r in active),
+            "empty_dates": sum(not r.dates_raw for r in active),
+            "missing_year": sum(r.start_year is None and r.end_year is None for r in active),
+            "missing_folios": sum(r.pages is None for r in active),
+            "flagged": sum(bool(r.review_flags) for r in active),
+            "withdrawn": sum(r.status == "withdrawn" for r in records),
+            "blocks": Counter(block for r in active for block in set(r.macroblocks)),
+        }
+    for code, path in paths.items():
+        page_visual = replace(visual, language=code)
+        page = _render_report(root, workbook_name, prepared, script_version, dictionary_version,
+                              macroblock_labels, page_visual, registry, manifest_path, paths, preview)
+        (root / path).write_text(page, encoding="utf-8")
+    return root / paths[visual.language]
+
+
+def _render_report(root, workbook_name, prepared, script_version, dictionary_version,
+                   macroblock_labels, visual, registry, manifest_path, paths, preview) -> str:
     report = Report(visual)
     tr = report.text
     table = partial(_table, tr=tr)
-    csv_table = partial(_csv_table, report=report)
+    csv_table = partial(_csv_table, report=report, preview=preview)
     files = partial(_files, report=report)
-    registry = language_registry or LanguageRegistry.load()
     alignment_path = root / "tables" / "vocabulary_alignment.csv"
     evidence_path = root / "tables" / "thematic_evidence.csv"
     udc_section = ""
@@ -101,7 +173,7 @@ def write_html_report(
         source = "https://udcsummary.info/php/index.php?lang=" + visual.language
         alignment = csv_table(alignment_path, root, [
             ("category", tr('Category')), ("concept_id", tr('Concept ID')),
-            ("label_uk" if visual.language == "uk" else "label_en", tr('Concept')),
+            ("label_" + visual.language if visual.language in {"uk", "hr", "it"} else "label_en", tr('Concept')),
             ("role", tr('Concept role')), ("udc_codes", tr('Broader UDC class')),
             ("scope_note", tr('Scope note')),
         ], limit=len(registry.reference["concepts"]))
@@ -112,46 +184,42 @@ def write_html_report(
             _escape(registry.reference["version"]), _escape(provenance.get("checked_on")),
             _escape(source), alignment, _link(evidence_path, root, tr('Thematic evidence for each file (CSV)')))
     sections, navigation = [], []
-    ordered = sorted(scopes, key=lambda key: (key != "combined", key))
+    ordered = sorted(prepared, key=lambda key: (key != "combined", key))
     for number, scope in enumerate(ordered):
-        records = scopes[scope]
-        active = [record for record in records if record.status == "case"]
-        sheets = {record.sheet_name for record in records}
-        scoped_issues = issues if scope == "combined" else [
-            issue for issue in issues if not issue.sheet_name or issue.sheet_name in sheets]
-        counts = Counter(issue.level for issue in scoped_issues)
-        refs = sorted({tr('{0}, fond {1}', visual.label('archives', r.source_archive, r.source_archive), r.source_fond) for r in records})
+        stats = prepared[scope]
+        total = stats["files"]
+        counts = stats["issues"]
+        refs = sorted(tr('{0}, fond {1}', visual.label('archives', archive, archive), fond)
+                      for archive, fond in stats["refs"])
         title = tr('Combined workbook scope') if scope == "combined" else "; ".join(refs) or scope
         anchor = f"scope-{number}"
         navigation.append(f'<a href="#{anchor}">{_escape(title)}</a>')
         tables, figures, reports = (root / folder / scope for folder in ("tables", "figures", "reports"))
-        years = [year for record in active for year in (record.start_year, record.end_year)
-                 if year is not None]
-        year_range = f"{min(years)}–{max(years)}" if years else tr('Not determined')
-        subject = sum(bool(record.categories) for record in active)
-        context = sum(not record.categories and bool(record.context_categories) for record in active)
+        year_range = stats["range"] or tr('Not determined')
+        subject = stats["subject"]
+        context = stats["context"]
 
         def percent(value):
-            return f"{value / len(active) * 100:.2f}" if active else "—"
+            return f"{value / total * 100:.2f}" if total else "—"
 
         cards = "".join(f'<article class="card"><strong>{_escape(value)}</strong><span>{label}</span></article>'
-                        for value, label in ((len(active), tr('files analysed')),
-                                             (len(sheets), tr('inventories')), (year_range, tr('file date range'))))
-        for message, languages in registry.notices({r.language for r in records}):
+                        for value, label in ((total, tr('files analysed')),
+                                             (stats["inventories"], tr('inventories')), (year_range, tr('file date range'))))
+        for message, languages in stats["notices"]:
             cards += '<p class="note">' + _escape(tr(message, languages)) + '</p>'
         quality = table([tr('Metric'), tr('Count')], [
             (tr('Errors'), counts["ERROR"]), (tr('Warnings'), counts["WARNING"]),
-            (tr('Empty date fields'), sum(not r.dates_raw for r in active)),
-            (tr('No file year determined'), sum(r.start_year is None and r.end_year is None for r in active)),
-            (tr('No folio count determined'), sum(r.pages is None for r in active)),
-            (tr('Files flagged for expert review'), sum(bool(r.review_flags) for r in active)),
-            (tr('Withdrawn entries'), sum(r.status == "withdrawn" for r in records)),
+            (tr('Empty date fields'), stats["empty_dates"]),
+            (tr('No file year determined'), stats["missing_year"]),
+            (tr('No folio count determined'), stats["missing_folios"]),
+            (tr('Files flagged for expert review'), stats["flagged"]),
+            (tr('Withdrawn entries'), stats["withdrawn"]),
         ])
-        skipped = sum(record.language not in registry.languages for record in active)
+        skipped = stats["skipped"]
         coverage = table([tr('Classification status'), tr('Files'), tr('% of all files in this scope')], [
             (label, value, percent(value)) for label, value in (
                 (tr('Subject assigned'), subject), (tr('Context only'), context),
-                (tr('Unclassified'), len(active) - subject - context - skipped),
+                (tr('Unclassified'), total - subject - context - skipped),
                 (tr('Skipped for language'), skipped))])
         descriptions = csv_table(tables / "description_summary.csv", root, [
             ("description", tr('Inventory')), ("cases_in_analysis", tr('Files')),
@@ -162,7 +230,7 @@ def write_html_report(
             ("percent_of_analyzed_titles", tr('% of all files in this scope')),
             ("eligible_titles", tr('Titles eligible for thematic classification')),
             ("percent_of_eligible_titles", tr('% of eligible titles'))])
-        blocks = Counter(block for record in active for block in set(record.macroblocks))
+        blocks = stats["blocks"]
         block_table = table([tr('Thematic block'), tr('Files'), tr('% of all files in this scope')],
                              [(visual.label("macroblocks", key, label), blocks[key], percent(blocks[key]))
                               for key, label in macroblock_labels.items()])
@@ -212,6 +280,7 @@ def write_html_report(
 *{box-sizing:border-box}body{margin:0;background:#f5f7fa;color:var(--ink);font:16px/1.55 system-ui,sans-serif}
 main{max-width:1200px;margin:auto;padding:28px}h1{font-size:30px}h2{margin-top:48px;border-bottom:3px solid var(--blue);padding-bottom:10px}h3{margin-top:28px}
 a{color:var(--blue);overflow-wrap:anywhere}nav{display:flex;flex-wrap:wrap;gap:10px 22px}.muted,figcaption{color:#546778;font-size:14px}
+.languages{gap:8px;margin:12px 0 18px}.languages a{display:inline-flex;align-items:center;gap:7px;padding:5px 9px;border:1px solid var(--line);border-radius:6px;background:white;text-decoration:none}.languages a[aria-current]{border-color:var(--blue);font-weight:650}.languages a:hover,.languages a:focus-visible{text-decoration:underline}.languages svg{width:24px;height:16px;border-radius:2px}
 .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;margin:20px 0}.card{background:white;border:1px solid var(--line);border-radius:10px;padding:18px}.card strong,.card span{display:block}.card strong{font-size:26px}
 .table-wrap{overflow:auto;background:white;border:1px solid var(--line)}table{border-collapse:collapse;width:100%;font-size:14px}th,td{padding:10px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}th{background:#e8f0f7}tr:nth-child(even){background:#f8fafc}
 figure{margin:20px 0;padding:12px;background:white;border:1px solid var(--line)}img{max-width:100%;height:auto;display:block;margin:auto}figcaption{text-align:center}
@@ -219,18 +288,21 @@ figure{margin:20px 0;padding:12px;background:white;border:1px solid var(--line)}
 @media(max-width:600px){main{padding:14px}h1{font-size:24px}}
 @media print{body{background:white}nav,details{display:none}main{max-width:none;padding:0}figure,.card{break-inside:avoid}}
 </style></head><body><main id="top"><h1>Аналіз архівних описів</h1>
+{10}
 <p>Вхідна книга: <strong>{1}</strong></p>
 <p class="muted">Програма {2} · словники {3}</p>
 <p class="note">Спільний зріз охоплює всі описи однієї книги. Підсумки окремих фондів є його складовими:
 їх не потрібно додавати до спільного підсумку. Аналіз стосується заголовків справ.</p>
 <nav aria-label="Розділи звіту">{4} {8}<a href="#downloads">Файли результатів</a></nav>
+{11}
 {5}{9}<section id="downloads"><h2>Файли результатів</h2>{6}
 <h3>Тематичні вибірки</h3>{7}</section>
 <footer>Для передавання звіту збережіть усю папку результатів книги разом із підпапками.
 Головний звіт, мережа тем і термінологія працюють локально. Географічні карти потребують інтернету для завантаження Leaflet.
 Сучасні кордони на картах не відтворюють адміністративний поділ досліджуваного періоду.</footer>
 </main></body></html>''', _escape(workbook_name), _escape(workbook_name), _escape(script_version), _escape(dictionary_version), ' '.join(navigation), ''.join(sections), general, exports,
-        '<a href="#udc">' + tr('Thematic categories and UDC') + '</a>' if udc_section else '', udc_section)
-    path = root / "report.html"
-    path.write_text(page, encoding="utf-8")
-    return path
+        '<a href="#udc">' + tr('Thematic categories and UDC') + '</a>' if udc_section else '', udc_section,
+        _language_switch(paths, visual, tr),
+        '<p class="muted">' + _escape(tr('Shared charts and supplementary reports are provided in the primary report language or in English where a translation is unavailable.')) + '</p>'
+        if len(paths) > 1 or visual.language not in {"uk", "en"} else '')
+    return page

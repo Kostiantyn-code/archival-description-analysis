@@ -70,7 +70,8 @@ class EnglishReportTests(unittest.TestCase):
                 for language in ("uk", "en"):
                     f.INPUT_FILE = source
                     f.RUN_DIR = base / language
-                    f.ANALYSIS_CONFIG = {"visualization": {"language": language}, "exports": {"enabled": False}}
+                    f.ANALYSIS_CONFIG = {"visualization": {"language": language, "alternate_languages": False},
+                                         "exports": {"enabled": False}}
                     with contextlib.redirect_stdout(io.StringIO()):
                         f.analyze_workbook(openpyxl, yaml, None, categories, ambiguities, blocks, version, "test")
                 uk = base / "uk"

@@ -1,4 +1,4 @@
-"""English/Ukrainian presentation of reports, charts and console messages."""
+"""Presentation settings, report translations and shared archive labels."""
 
 from __future__ import annotations
 
@@ -10,6 +10,11 @@ from functools import lru_cache
 from pathlib import Path
 
 CATALOG = Path(__file__).resolve().parent / "config" / "localization.json"
+REPORT_CATALOG = CATALOG.with_name("report_locales.json")
+REPORT_LANGUAGES = {
+    "uk": "Українська", "en": "English", "hr": "Hrvatski",
+    "it": "Italiano", "ru": "Русский",
+}
 
 
 @lru_cache(maxsize=1)
@@ -17,22 +22,31 @@ def english_catalog() -> dict:
     return json.loads(CATALOG.read_text(encoding="utf-8"))
 
 
+@lru_cache(maxsize=1)
+def report_locales() -> dict:
+    return json.loads(REPORT_CATALOG.read_text(encoding="utf-8"))
+
+
 @dataclass(frozen=True)
 class Visualization:
     language: str = "en"
     bilingual_labels: bool = False
     label_overrides: dict = field(default_factory=dict)
+    alternate_languages: bool = True
 
     @classmethod
     def from_config(cls, config: dict) -> "Visualization":
         options = config.get("visualization", {})
         if not isinstance(options, dict):
             raise ValueError("visualization: expected a mapping")
-        language = options.get("language", "en")
+        language = options.get("language", "uk")
         bilingual = options.get("bilingual_labels", False)
         overrides = options.get("label_overrides", {})
-        if language not in ("uk", "en"):
-            raise ValueError("visualization.language: expected uk or en")
+        alternates = options.get("alternate_languages", True)
+        if not isinstance(language, str) or language not in REPORT_LANGUAGES:
+            raise ValueError("visualization.language: expected " + ", ".join(REPORT_LANGUAGES))
+        if not isinstance(alternates, bool):
+            raise ValueError("visualization.alternate_languages: expected true or false")
         if not isinstance(bilingual, bool):
             raise ValueError("visualization.bilingual_labels: expected true or false")
         if not isinstance(overrides, dict) or any(
@@ -47,7 +61,12 @@ class Visualization:
             raise ValueError(
                 "visualization.label_overrides: expected groups of string labels"
             )
-        return cls(language, bilingual, overrides)
+        return cls(language, bilingual, overrides, alternates)
+
+    def report_languages(self) -> tuple[str, ...]:
+        if not self.alternate_languages:
+            return (self.language,)
+        return (self.language, *(code for code in REPORT_LANGUAGES if code != self.language))
 
     @property
     def bilingual(self) -> bool:
@@ -67,7 +86,9 @@ class Visualization:
         if self.language == "uk":
             return ukrainian
         translated = self.label_overrides.get(group, {}).get(
-            key, catalogue.get(group, {}).get(key, original)
+            key, report_locales().get(self.language, {}).get(group, {}).get(
+                key, catalogue.get(group, {}).get(key, original)
+            )
         )
         if self.bilingual and translated != ukrainian:
             return f"{translated} ({ukrainian})"
@@ -81,10 +102,9 @@ class Visualization:
                 + (f", ф. {fond}" if fond else "")
                 + (f": опис {inventory}" if inventory else "")
             )
-        return (
-            archive
-            + (f", fonds {fond}" if fond else "")
-            + (f": inventory {inventory}" if inventory else "")
+        tr = Report(self).text
+        return archive + (tr(", fonds {0}", fond) if fond else "") + (
+            tr(": inventory {0}", inventory) if inventory else ""
         )
 
     def description(self, key: str, original: str) -> str:
@@ -95,11 +115,10 @@ class Visualization:
         # These strings are generated archival references, not case titles.
         archive, *rest = re.split(r"(, ф\. |: опис |, оп\. )", original, maxsplit=1)
         reference = self.label("archives", archive, archive) + "".join(rest)
-        return (
-            reference.replace(", ф. ", ", fonds ")
-            .replace(": опис ", ": inventory ")
-            .replace(", оп. ", ", inventory ")
-        )
+        tr = Report(self).text
+        return (reference.replace(", ф. ", tr(", fonds {0}", ""))
+                .replace(": опис ", tr(": inventory {0}", ""))
+                .replace(", оп. ", tr(", inventory {0}", "")))
 
     def template(self, source: str) -> str:
         """Localize trusted template text BEFORE embedding any source data.
@@ -110,7 +129,7 @@ class Visualization:
         """
         if self.language == "uk":
             return source
-        translations, pattern = report_catalog("en")
+        translations, pattern = report_catalog(self.language)
 
         def javascript(value: str) -> str:
             return (
@@ -131,23 +150,30 @@ class Visualization:
             )
         return (
             "".join(parts)
-            .replace('lang="uk"', 'lang="en"')
-            .replace("'uk-UA'", "'en-GB'")
+            .replace('lang="uk"', f'lang="{self.language}"')
+            .replace("'uk-UA'", "'" + {
+                "en": "en-GB", "hr": "hr-HR", "it": "it-IT", "ru": "ru-RU",
+            }[self.language] + "'")
         )
 
     def metadata(self) -> dict:
         return {
             "language": self.language,
+            "alternate_languages": self.alternate_languages,
             "bilingual_labels": self.bilingual_labels,
             "label_overrides": self.label_overrides,
         }
 
 
-@lru_cache(maxsize=2)
+@lru_cache(maxsize=len(REPORT_LANGUAGES))
 def report_catalog(language="en"):
     catalog = english_catalog()["ui"]
     if language == "uk":
         catalog = {english: ukrainian for ukrainian, english in catalog.items()}
+    elif language != "en":
+        localized = report_locales()[language]["ui"]
+        catalog = {**{key: localized.get(value, value) for key, value in catalog.items()},
+                   **localized}
     pattern = re.compile(
         r"(?<!\w)(?:"
         + "|".join(re.escape(key) for key in sorted(catalog, key=len, reverse=True))
@@ -170,8 +196,8 @@ class Report:
         source = catalog.get(source) or pattern.sub(
             lambda m: catalog[m.group()], source
         )
-        if self.visual.language == "en":
-            source = source.replace('lang="uk"', 'lang="en"')
+        if self.visual.language != "uk":
+            source = source.replace('lang="uk"', f'lang="{self.visual.language}"')
         return (
             re.sub(r"\{(\d+)\}", lambda m: str(values[int(m[1])]), source)
             if values
@@ -188,4 +214,10 @@ class Report:
             )
         if key == "description":
             return self.visual.description(row.get("sheet_name", ""), value)
+        if key == "category" and value:
+            return self.visual.label("categories", value, value)
+        if key == "role":
+            return self.text({"subject": "Subject", "context": "Context"}.get(value, value))
+        if key.startswith("label_"):
+            return value or row.get("label_en", "")
         return value

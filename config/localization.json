@@ -1,5 +1,9 @@
 {
   "ui": {
+    "Мова звіту": "Report language",
+    "Предметна тема": "Subject",
+    "Контекст": "Context",
+    "Спільні графіки й додаткові звіти використовують основну мову звіту або англійську для підписів без перекладу.": "Shared charts and supplementary reports are provided in the primary report language or in English where a translation is unavailable.",
     "Тематика та УДК": "Thematic categories and UDC",
     "Індекси УДК відображають авторське зіставлення з ширшими тематичними класами. Таблиця підстав містить словникові збіги й правила, за якими визначено тематику.": "UDC classes show the author's alignment to broader subject classes. The evidence table records the dictionary matches and rules behind thematic decisions.",
     "Еталонний словник": "Reference vocabulary",

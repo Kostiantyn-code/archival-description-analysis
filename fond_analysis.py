@@ -28,10 +28,12 @@ from geography import (
     write_maps as write_geography_maps,
 )
 from theme_links import write_theme_links
-from html_report import write_html_report
+from html_report import html_report_paths, write_html_report
 from report_utils import write_csv
 from udc_report import write_udc_tables
-from localization import Visualization, Report, CATALOG as PRESENTATION_CATALOG
+from localization import (
+    CATALOG as PRESENTATION_CATALOG, REPORT_CATALOG, Report, Visualization,
+)
 from language_packs import (
     LanguageRegistry, REGISTRY as LANGUAGE_REGISTRY, cached_registry,
     evaluate_concepts, pack_content, lexical_patterns, structural_patterns,
@@ -2570,7 +2572,7 @@ def analyze_workbook(openpyxl_module, yaml_module, plt, categories, ambiguities,
         openpyxl_module, records, categories
     )
 
-    tracked = sorted({INPUT_FILE, PRESENTATION_CATALOG, GAZETTEER, *BASE_DIR.glob("*.py"),
+    tracked = sorted({INPUT_FILE, PRESENTATION_CATALOG, REPORT_CATALOG, GAZETTEER, *BASE_DIR.glob("*.py"),
                       *CONFIG_DIR.glob("*.yaml"), *CONFIG_DIR.glob("*.json"),
                       *DICTIONARIES_DIR.glob("*.yaml"),
                       *(BASE_DIR / "maps").glob("*.html"),
@@ -2589,6 +2591,7 @@ def analyze_workbook(openpyxl_module, yaml_module, plt, categories, ambiguities,
         "pyyaml": yaml_module.__version__,
         "visualization": visual.metadata(),
         "report_language": visual.language,
+        "html_reports": html_report_paths(visual),
         "analysis_languages": {code: registry.metadata(code) for code in sorted({r.language for r in records})},
         "udc_alignment": {
             "reference_version": registry.reference["version"],

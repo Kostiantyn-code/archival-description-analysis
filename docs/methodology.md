@@ -41,8 +41,13 @@ mixed-language titles can be flagged but are not automatically translated.
 Unidentified Latin-script sheets remain `undetermined`. Unsupported languages
 are skipped with a notice. Use explicit language declarations for research.
 
-Presentation is independently English or Ukrainian. Labels and trusted captions
-come from `config/localization.json`. English category and lexical-marker labels in analytical tables remain
+The main HTML report is available in Ukrainian, English, Croatian, Italian and
+Russian. Ukrainian opens by default. `visualization.language` selects the
+opening language, and `visualization.alternate_languages: false` produces
+just that version. The manifest lists the generated HTML views. All versions
+link to the same analytical tables, charts and supplementary reports. The
+supplementary material uses the primary report language with English fallback
+for untranslated captions. English category and lexical-marker labels in analytical tables remain
 stable when the presentation language changes. Original descriptions are never
 translated. As in earlier versions, CSV `*_raw` strings have outer whitespace
 trimmed; the input XLSX is authoritative for exact cell contents.

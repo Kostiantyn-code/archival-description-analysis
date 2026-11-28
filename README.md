@@ -41,8 +41,12 @@ Each workbook is analysed separately, with inventory and fonds breakdowns.
 
 ### Settings and results
 
-Edit `config/analysis.yaml`. Reports are **English by default**; set
-`visualization.language: uk` for Ukrainian. `analysis.language: auto` uses the
+Edit `config/analysis.yaml`. The main HTML report opens in **Ukrainian** and
+includes offline links to the English, Croatian, Italian and Russian versions by
+default. Set `visualization.language` to choose which language opens in
+`report.html`. Set `visualization.alternate_languages: false` to generate only
+that language. Data exports, charts and supplementary reports are shared across
+language views. `analysis.language: auto` uses the
 worksheet declaration or language inference; explicit declarations are preferable
 for research. `exports.enabled: false` skips thematic workbook/CSV selections.
 
@@ -109,8 +113,13 @@ python fond_analysis.py
 
 ### Налаштування й результати
 
-Редагуйте `config/analysis.yaml`. Звіти **типово англійською**; для української
-встановіть `visualization.language: uk`. Параметр `analysis.language: auto`
+Редагуйте `config/analysis.yaml`. Головний HTML-звіт відкривається
+**українською**. Перемикач із прапорцями веде до англійської, хорватської,
+італійської та російської версій без підключення до інтернету.
+`visualization.language` задає мову файлу `report.html`.
+`visualization.alternate_languages: false` залишає тільки вибрану версію.
+Таблиці, графіки й додаткові звіти спільні для всіх мовних версій.
+Параметр `analysis.language: auto`
 використовує зазначення мови на аркуші або її евристичне визначення; для
 дослідження бажано задавати мову явно. `exports.enabled: false` вимикає тематичні
 XLSX/CSV-вибірки.

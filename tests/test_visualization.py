@@ -29,10 +29,43 @@ from localization import Visualization, english_catalog
 
 
 class VisualizationTests(unittest.TestCase):
+    def test_default_report_switch_and_single_language_mode(self):
+        headings = {"uk": "Аналіз архівних описів", "en": "Archival finding aid analysis",
+                    "hr": "Analiza arhivskih popisa", "it": "Analisi degli inventari archivistici",
+                    "ru": "Анализ архивных описей"}
+        name = "Оригінал <script>{0}</script>.xlsx"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            primary = write_html_report(root, name, {"combined": []}, [], "test", "dict", {})
+            self.assertEqual(primary.name, "report.html")
+            for code, heading in headings.items():
+                path = primary if code == "uk" else root / f"report.{code}.html"
+                page = path.read_text(encoding="utf-8")
+                self.assertIn(f'<html lang="{code}">', page)
+                self.assertIn(f"<h1>{heading}</h1>", page)
+                self.assertIn("Оригінал &lt;script&gt;{0}&lt;/script&gt;.xlsx", page)
+                self.assertEqual(page.count('aria-current="page"'), 1)
+                self.assertEqual(page.count('viewBox="0 0 24 16"'), 5)
+                for target in headings:
+                    destination = "report.html" if target == "uk" else f"report.{target}.html"
+                    self.assertIn(f'href="{destination}" hreflang="{target}"', page)
+
+            single = root / "single"
+            single.mkdir()
+            visual = Visualization.from_config({"visualization": {
+                "language": "it", "alternate_languages": False,
+            }})
+            page = write_html_report(single, name, {"combined": []}, [], "test", "dict", {},
+                                     visual).read_text(encoding="utf-8")
+            self.assertIn(f"<h1>{headings['it']}</h1>", page)
+            self.assertNotIn('class="languages"', page)
+            self.assertEqual([path.name for path in single.glob("report*.html")], ["report.html"])
+
     def test_defaults_validation_and_original_fallback(self):
         self.assertEqual(Visualization.from_config({}).metadata(),
-                         {"language": "en", "bilingual_labels": False, "label_overrides": {}})
-        for options in ({"language": "fr"}, {"bilingual_labels": "false"},
+                         {"language": "uk", "alternate_languages": True, "bilingual_labels": False,
+                          "label_overrides": {}})
+        for options in ({"language": "fr"}, {"bilingual_labels": "false"}, {"alternate_languages": "false"},
                         {"label_overrides": {"terms": []}}, None):
             with self.assertRaises(ValueError):
                 Visualization.from_config({"visualization": options})
@@ -73,7 +106,7 @@ class VisualizationTests(unittest.TestCase):
                 ("one", "ДАМО", 230, 1, "Листування про школу в м. Миколаїв: відкриття і політичний нагляд")])
             config = {"input_dir": str(root / "input"), "output_root": str(root / "outputs"),
                       "exports": {"enabled": False}, "visualization": {
-                          "language": "en", "bilingual_labels": True,
+                          "language": "en", "alternate_languages": True, "bilingual_labels": True,
                           "label_overrides": {"categories": {"education": "Education </script>"}}}}
             path = root / "analysis.yaml"
             path.write_text(yaml.safe_dump(config, allow_unicode=True))
@@ -89,7 +122,11 @@ class VisualizationTests(unittest.TestCase):
             folder = next((root / "outputs").glob("*/book"))
             manifest = json.loads((folder / "run_manifest.json").read_text())
             self.assertEqual(manifest["visualization"], config["visualization"])
+            self.assertEqual(manifest["html_reports"]["en"], "report.html")
+            self.assertEqual(manifest["html_reports"]["uk"], "report.uk.html")
+            self.assertTrue(set(manifest["html_reports"].values()) <= set(manifest["outputs"]))
             self.assertIn("config/localization.json", manifest["sha256"])
+            self.assertIn("config/report_locales.json", manifest["sha256"])
             scopes = [row["source"] for row in manifest["source_summary"]]
             self.assertIn("Theme links", (folder / "report.html").read_text())
             for scope in scopes:
