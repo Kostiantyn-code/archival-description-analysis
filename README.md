@@ -1,31 +1,64 @@
 # Archival Finding Aid Analysis
 
-[English](#english) · [Українська](#українська)
+[Українська](#українська) · [English](#english)
+
+## Українська
+
+Програма аналізує заголовки справ з архівних описів XLSX. Вона формує тематичні
+вибірки, таблиці відповідностей УДК, хронологію та звіти про згадки населених пунктів.
+
+1. Установіть Python 3.12 або новіший і покладіть книги XLSX у `input/`.
+2. У Windows запустіть `run.bat`. У Linux або macOS скористайтеся [командами нижче](#linux-and-macos).
+3. Відкрийте `outputs/<запуск>/<книга>/report.html`. Поруч збережено CSV, графіки,
+   тематичні вибірки й `run_manifest.json` з контрольними сумами.
+
+Один аркуш відповідає одному опису. У [зразку XLSX](#xlsx-layout) можна замінити
+`Archive`, `Fonds`, `Inventory` на «Архів», «Фонд», «Опис» і використати
+українські заголовки колонок. У D1 введіть `Language`, у E1 — код мови заголовків
+`uk`, `en`, `hr`, `it` або `ru`. Якщо відомостей про аркуші немає, залиште D4 порожньою.
+
+Головний звіт відкривається українською та має перемикач п’яти мов.
+У `config/analysis.yaml` параметр `visualization.language` задає мову відкриття,
+а `visualization.alternate_languages: false` залишає одну версію.
+Карти завантажують Leaflet через інтернет.
+
+### Новий реєстр населених пунктів
+
+Окремий офлайн-інструмент збирає та поповнює базу SQLite з GeoNames.
+Пошук за історичним чи сучасним написанням повертає можливі місця,
+джерела й відомі дати вжитку назви. У знімку від 28 листопада 2026 року
+понад мільйон населених пунктів. [Джерела, запуск і доповнення реєстру](docs/city_register.md)
+
+[Методологія та перевірка](docs/methodology.md) · [Підготовка хорватського опису](docs/split208_preparation.md)
 
 ## English
 
-Explore the thematic structure of archival finding aids from XLSX inventories.
-The program produces an HTML report, charts, auditable CSV tables and thematic
-XLSX selections. It analyses descriptions, not the documents inside each file.
+Analyse archival file titles in XLSX finding aids. Results include thematic
+selections, UDC correspondence tables, chronologies and place-mention reports.
 
-### Run
+1. Install Python 3.12 or newer and put the XLSX workbooks in `input/`.
+2. Run `run.bat` on Windows or use the [commands below](#linux-and-macos).
+3. Open `outputs/<run>/<workbook>/report.html`. CSV tables, charts, thematic
+   selections and the checksum manifest are in the same folder.
 
-Install Python 3.12 or newer. On **Windows**, put your workbooks in `input/` and
-run `run.bat`; it creates a local environment and installs the dependencies.
-On **Linux/macOS**, run these commands in the downloaded project folder:
+Each sheet represents one inventory. Set D1 to `Language` and E1 to the language
+of the file titles (`uk`, `en`, `hr`, `it` or `ru`). Leave D4 blank if folio
+counts are unavailable. Ukrainian headers are also accepted.
 
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -r requirements.txt
-python fond_analysis.py
-```
+The main report opens in Ukrainian with a five-language switcher.
+In `config/analysis.yaml`, use `visualization.language` to change the opening
+language and `visualization.alternate_languages: false` to produce one version.
+Maps load Leaflet over the internet.
 
-### Input
+### New settlement register
 
-Each worksheet represents one inventory. Use this layout; Ukrainian headers are
-also accepted. `Fonds` identifies the archival collection. D1/E1 explicitly set
-the language of the descriptions, independently of the report language.
+A standalone tool builds and extends an offline GeoNames SQLite register.
+Search by modern or historical spelling to find candidates, sources and any
+recorded dates of use. [Sources and commands](docs/city_register.md)
+
+[Method and validation](docs/methodology.md) · [Croatian source preparation](docs/split208_preparation.md)
+
+### XLSX layout
 
 | Row | A | B | C | D | E |
 |---|---|---|---|---|---|
@@ -35,116 +68,11 @@ the language of the descriptions, independently of the report language.
 | 4 | No. | Title | Dates | Folios | Notes |
 | 5 | 1 | Opening a school | 1850 | 12 | |
 
-Use language codes `en`, `uk`, `hr`, `it` or `ru`. Leave D4 empty when the source
-has no folio counts. Keep original descriptions; no translation is required.
-Each workbook is analysed separately, with inventory and fonds breakdowns.
-
-### Settings and results
-
-Edit `config/analysis.yaml`. The main HTML report opens in **Ukrainian** and
-includes offline links to the English, Croatian, Italian and Russian versions by
-default. Set `visualization.language` to choose which language opens in
-`report.html`. Set `visualization.alternate_languages: false` to generate only
-that language. Data exports, charts and supplementary reports are shared across
-language views. `analysis.language: auto` uses the
-worksheet declaration or language inference; explicit declarations are preferable
-for research. `exports.enabled: false` skips thematic workbook/CSV selections.
-
-Results appear in `outputs/<run>/<workbook>/report.html`. The same folder contains
-`reports/`, `figures/`, `tables/`, `thematic_exports/` and `run_manifest.json` with
-source/configuration checksums. Earlier runs and input workbooks are retained.
-Maps need internet to load Leaflet; the other reports work locally.
-
-### Method and reproducibility
-
-English, Ukrainian, Croatian and Italian share 53 concepts and eight rules.
-UDC numbers are broader subject anchors; concept IDs define equivalence.
-Russian retains its separate historical-description rules. One YAML file per
-language is in `dictionaries/`; categories are in `config/categories.yaml`.
-
-Coverage is not accuracy. Context, spelling, language and descriptive conventions
-can affect the results; independent linguistic and corpus validation is still
-needed. Record the code revision and run manifest when citing results.
-
-[Method, exports and data attribution](docs/methodology.md) ·
-[Reproduce the Croatian source conversion](docs/split208_preparation.md)
-
-```bash
-python -m unittest discover -s tests -q
-python tools/validate_language_packs.py --output outputs/validation
-```
-
-## Українська
-
-Дослідження тематичної структури архівних описів у форматі XLSX. Програма створює
-HTML-звіт, графіки, перевірні CSV-таблиці й тематичні XLSX-вибірки. Вона аналізує
-описи, а не документи всередині справ.
-
-### Запуск
-
-Установіть Python 3.12 або новіший. У **Windows** покладіть книги в `input/`
-і запустіть `run.bat`: він створить локальне середовище та встановить залежності.
-У **Linux/macOS** виконайте ці команди в завантаженій папці проєкту:
+### Linux and macOS
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
 python fond_analysis.py
-```
-
-### Вхідні дані
-
-Кожен аркуш представляє один опис. Використовуйте наведену структуру; українські
-назви колонок також підтримуються. `Fonds` означає архівний фонд. D1/E1 явно
-задають мову описів незалежно від мови звіту.
-
-| Рядок | A | B | C | D | E |
-|---|---|---|---|---|---|
-| 1 | Архів | Назва архіву | | Language | uk |
-| 2 | Фонд | 230 | | | |
-| 3 | Опис | 1 | | | |
-| 4 | № | Заголовок справи | Крайні дати | Кількість аркушів | Примітки |
-| 5 | 1 | Відкриття школи | 1850 | 12 | |
-
-Коди мов: `en`, `uk`, `hr`, `it`, `ru`. Залиште D4 порожньою, якщо джерело не
-містить кількості аркушів. Зберігайте оригінальні описи, переклад не потрібен.
-Кожна книга аналізується окремо з розподілами за описами й фондами.
-
-### Налаштування й результати
-
-Редагуйте `config/analysis.yaml`. Головний HTML-звіт відкривається
-**українською**. Перемикач із прапорцями веде до англійської, хорватської,
-італійської та російської версій без підключення до інтернету.
-`visualization.language` задає мову файлу `report.html`.
-`visualization.alternate_languages: false` залишає тільки вибрану версію.
-Таблиці, графіки й додаткові звіти спільні для всіх мовних версій.
-Параметр `analysis.language: auto`
-використовує зазначення мови на аркуші або її евристичне визначення; для
-дослідження бажано задавати мову явно. `exports.enabled: false` вимикає тематичні
-XLSX/CSV-вибірки.
-
-Результат: `outputs/<запуск>/<книга>/report.html`. Поруч містяться `reports/`,
-`figures/`, `tables/`, `thematic_exports/` і `run_manifest.json` із контрольними
-сумами джерела й налаштувань. Попередні результати та вхідні книги зберігаються.
-Карти потребують інтернету для Leaflet, решта звітів працює локально.
-
-### Метод і відтворюваність
-
-Англійська, українська, хорватська й італійська використовують 53 спільні поняття
-та вісім правил. Індекси УДК задають ширші тематичні орієнтири, а відповідність
-визначають ідентифікатори понять. Російська зберігає окремі правила для історичних
-описів. У `dictionaries/` є один YAML-файл на мову, категорії задані в
-`config/categories.yaml`.
-
-Покриття не є точністю. Контекст, правопис, мова та практика описування впливають
-на результати; незалежна лінгвістична й корпусна перевірка ще потрібна. Для
-цитування результатів фіксуйте версію коду та маніфест запуску.
-
-[Метод, експорт і походження даних](docs/methodology.md) ·
-[Відтворення конвертації хорватського джерела](docs/split208_preparation.md)
-
-```bash
-python -m unittest discover -s tests -q
-python tools/validate_language_packs.py --output outputs/validation
 ```
