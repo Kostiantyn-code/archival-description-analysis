@@ -79,6 +79,24 @@ language-pack versions, software versions, selected categories and output paths
 in `run_manifest.json`. A failed workbook is logged in `failure.txt` and the batch
 summary; other workbooks continue. Tables and examples expose lexical evidence.
 
+The workbook's HTML report links to two UDC verification tables in `tables/`.
+`vocabulary_alignment.csv` maps the shared concepts to broader UDC classes,
+roles, scope notes and multilingual search forms. `thematic_evidence.csv`
+identifies the source row, original title, evidence origin, matched dictionary
+forms and concept or rule behind each subject assignment or context mention.
+Rows carrying the same rule ID show the concepts involved in that rule. An
+inherited assignment identifies its inventory heading as the evidence origin.
+`not_assigned` identifies a shared concept without a UDC class, while
+`not_mapped` marks evidence from rules without an established UDC alignment.
+The manifest records the reference version, consultation date and sources.
+
+The thematic count tables report both the percentage of all case titles
+(`percent_of_analyzed_titles`) and the percentage of titles eligible for thematic
+classification (`percent_of_eligible_titles`). Eligibility depends on the
+worksheet language having a thematic dictionary. Both denominators and the count
+skipped for language are included. An empty eligible percentage indicates a
+zero eligible denominator.
+
 Subject XLSX selections copy original A–E values, metadata, selected rows, styles,
 widths, row heights and worksheet order. `exports.source_columns` can include
 additional columns. Empty worksheets remain. `unclassified.xlsx` contains all

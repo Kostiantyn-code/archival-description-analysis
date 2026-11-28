@@ -11,7 +11,7 @@ from pathlib import Path
 import re
 import unicodedata
 import yaml
-from models import CATEGORY_RULE_FIELDS
+from models import CATEGORY_RULE_FIELDS, ConceptMatch
 
 ROOT = Path(__file__).resolve().parent
 REGISTRY = ROOT / "dictionaries" / "en.yaml"
@@ -240,6 +240,29 @@ class LanguageRegistry:
     def source_paths(self):
         return [pack["_path"] for pack in self.languages.values()]
 
+    def alignment_rows(self):
+        ordered = ["en", *sorted(
+            code for code, pack in self.languages.items()
+            if code != "en" and pack["vocabulary"] == "reference"
+        )]
+        for concept in self.reference["concepts"]:
+            cid = concept["id"]
+            aliases = {
+                code: self.languages[code]["concepts"][cid] for code in ordered[1:]
+            }
+            yield {
+                "concept_id": cid,
+                "category": concept["category"],
+                "role": concept["kind"],
+                "udc_codes": " | ".join(concept["udc_codes"]),
+                "udc_relation": concept["udc_relation"],
+                "scope_note": concept["scope_note"],
+                "label_en": concept["label_en"],
+                **{f"label_{code}": terms[0] if terms else "" for code, terms in aliases.items()},
+                "terms_en": " | ".join(concept["terms"]),
+                **{f"terms_{code}": " | ".join(terms) for code, terms in aliases.items()},
+            }
+
     def notices(self, languages):
         languages = set(languages)
         unsupported = sorted(languages - set(self.languages))
@@ -273,9 +296,14 @@ class LanguageRegistry:
                 yield (message, ", ".join(missing))
 
 
+@lru_cache(maxsize=2)
+def cached_registry(path: Path):
+    return LanguageRegistry.load(path)
+
+
 @lru_cache(maxsize=32)
 def pack_content(language):
-    registry = LanguageRegistry.load()
+    registry = cached_registry(REGISTRY)
     if language not in registry.languages:
         return {}
     pack = registry.languages[language]
@@ -315,7 +343,7 @@ def alias_hits(title, language, section):
 
 @lru_cache(maxsize=32)
 def structural_patterns(language):
-    pack = LanguageRegistry.load().languages.get(language, {})
+    pack = cached_registry(REGISTRY).languages.get(language, {})
     words = pack.get("year_words", [])
     year = (
         re.compile(
@@ -365,7 +393,7 @@ def evaluate_concepts(matches, concepts, rules, category_id):
         forms = hits[concept["id"]]
         if not forms or concept["category"] != category_id:
             continue
-        evidence = "concept:" + concept["id"] + ": " + " | ".join(forms)
+        evidence = ConceptMatch({concept["id"]: forms})
         if concept["kind"] == "subject":
             score += 3
             subject.append(evidence)
@@ -377,10 +405,5 @@ def evaluate_concepts(matches, concepts, rules, category_id):
         ):
             score += 3
             used = [cid for cid in rule["all"] + rule["any"] if hits[cid]]
-            subject.append(
-                "concept_rule:"
-                + rule["id"]
-                + ": "
-                + "; ".join(cid + "=" + " | ".join(hits[cid]) for cid in used)
-            )
+            subject.append(ConceptMatch({cid: hits[cid] for cid in used}, rule["id"]))
     return score, subject, context

@@ -92,6 +92,25 @@ def write_html_report(
     table = partial(_table, tr=tr)
     csv_table = partial(_csv_table, report=report)
     files = partial(_files, report=report)
+    registry = language_registry or LanguageRegistry.load()
+    alignment_path = root / "tables" / "vocabulary_alignment.csv"
+    evidence_path = root / "tables" / "thematic_evidence.csv"
+    udc_section = ""
+    if alignment_path.is_file() and evidence_path.is_file():
+        provenance = registry.reference.get("provenance", {})
+        source = "https://udcsummary.info/php/index.php?lang=" + visual.language
+        alignment = csv_table(alignment_path, root, [
+            ("category", tr('Category')), ("concept_id", tr('Concept ID')),
+            ("label_uk" if visual.language == "uk" else "label_en", tr('Concept')),
+            ("role", tr('Concept role')), ("udc_codes", tr('Broader UDC class')),
+            ("scope_note", tr('Scope note')),
+        ], limit=len(registry.reference["concepts"]))
+        udc_section = tr('''<section id="udc"><h2>Тематика та УДК</h2>
+<p>Індекси УДК відображають авторське зіставлення з ширшими тематичними класами. Таблиця підстав містить словникові збіги й правила, за якими визначено тематику.</p>
+<p>Еталонний словник {0} · Дата звірення з джерелами УДК {1} · <a href="{2}">UDC Summary</a></p>
+{3}<p>{4}</p></section>''',
+            _escape(registry.reference["version"]), _escape(provenance.get("checked_on")),
+            _escape(source), alignment, _link(evidence_path, root, tr('Thematic evidence for each file (CSV)')))
     sections, navigation = [], []
     ordered = sorted(scopes, key=lambda key: (key != "combined", key))
     for number, scope in enumerate(ordered):
@@ -118,7 +137,6 @@ def write_html_report(
         cards = "".join(f'<article class="card"><strong>{_escape(value)}</strong><span>{label}</span></article>'
                         for value, label in ((len(active), tr('files analysed')),
                                              (len(sheets), tr('inventories')), (year_range, tr('file date range'))))
-        registry = language_registry or LanguageRegistry.load()
         for message, languages in registry.notices({r.language for r in records}):
             cards += '<p class="note">' + _escape(tr(message, languages)) + '</p>'
         quality = table([tr('Metric'), tr('Count')], [
@@ -129,17 +147,21 @@ def write_html_report(
             (tr('Files flagged for expert review'), sum(bool(r.review_flags) for r in active)),
             (tr('Withdrawn entries'), sum(r.status == "withdrawn" for r in records)),
         ])
+        skipped = sum(record.language not in registry.languages for record in active)
         coverage = table([tr('Classification status'), tr('Files'), tr('% of all files in this scope')], [
             (label, value, percent(value)) for label, value in (
                 (tr('Subject assigned'), subject), (tr('Context only'), context),
-                (tr('Unclassified'), len(active) - subject - context))])
+                (tr('Unclassified'), len(active) - subject - context - skipped),
+                (tr('Skipped for language'), skipped))])
         descriptions = csv_table(tables / "description_summary.csv", root, [
             ("description", tr('Inventory')), ("cases_in_analysis", tr('Files')),
             ("withdrawn_records", tr('Withdrawn')), ("subject_classified", tr('Subject assigned')),
             ("context_only", tr('Context only')), ("unclassified", tr('Unclassified'))])
         categories = csv_table(tables / "category_counts.csv", root, [
             ("category_label", tr('Category')), ("cases", tr('Files')),
-            ("percent_of_analyzed_titles", tr('% of all files in this scope'))])
+            ("percent_of_analyzed_titles", tr('% of all files in this scope')),
+            ("eligible_titles", tr('Titles eligible for thematic classification')),
+            ("percent_of_eligible_titles", tr('% of eligible titles'))])
         blocks = Counter(block for record in active for block in set(record.macroblocks))
         block_table = table([tr('Thematic block'), tr('Files'), tr('% of all files in this scope')],
                              [(visual.label("macroblocks", key, label), blocks[key], percent(blocks[key]))
@@ -167,7 +189,7 @@ def write_html_report(
 <h3>Склад за описами</h3>{4}
 <h3>Якість даних</h3>{5}{6}
 <h3>Покриття тематичною класифікацією</h3>{7}
-<p>За 100% узято всі справи поточного зрізу. Три стани класифікації взаємовиключні.</p>
+<p>Покриття розраховано від усіх справ поточного зрізу. До доступних для класифікації належать справи, для мови аркуша яких є тематичний словник.</p>
 <h3>Тематичні категорії</h3>{8}<h3>Тематичні блоки</h3>{9}
 <p>Одна справа може належати до кількох категорій і блоків; сума їхніх часток може перевищувати 100%.</p>
 <h3>Хронологія</h3>{10}
@@ -201,13 +223,14 @@ figure{margin:20px 0;padding:12px;background:white;border:1px solid var(--line)}
 <p class="muted">Програма {2} · словники {3}</p>
 <p class="note">Спільний зріз охоплює всі описи однієї книги. Підсумки окремих фондів є його складовими:
 їх не потрібно додавати до спільного підсумку. Аналіз стосується заголовків справ.</p>
-<nav aria-label="Розділи звіту">{4} <a href="#downloads">Файли результатів</a></nav>
-{5}<section id="downloads"><h2>Файли результатів</h2>{6}
+<nav aria-label="Розділи звіту">{4} {8}<a href="#downloads">Файли результатів</a></nav>
+{5}{9}<section id="downloads"><h2>Файли результатів</h2>{6}
 <h3>Тематичні вибірки</h3>{7}</section>
 <footer>Для передавання звіту збережіть усю папку результатів книги разом із підпапками.
 Головний звіт, мережа тем і термінологія працюють локально. Географічні карти потребують інтернету для завантаження Leaflet.
 Сучасні кордони на картах не відтворюють адміністративний поділ досліджуваного періоду.</footer>
-</main></body></html>''', _escape(workbook_name), _escape(workbook_name), _escape(script_version), _escape(dictionary_version), ' '.join(navigation), ''.join(sections), general, exports)
+</main></body></html>''', _escape(workbook_name), _escape(workbook_name), _escape(script_version), _escape(dictionary_version), ' '.join(navigation), ''.join(sections), general, exports,
+        '<a href="#udc">' + tr('Thematic categories and UDC') + '</a>' if udc_section else '', udc_section)
     path = root / "report.html"
     path.write_text(page, encoding="utf-8")
     return path
