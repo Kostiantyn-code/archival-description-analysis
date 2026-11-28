@@ -45,7 +45,7 @@ def read_basemap(path: Path) -> dict:
         if not isinstance(feature, dict) or feature.get("type") != "Feature":
             raise ValueError("Invalid GeoJSON feature")
         geometry = feature.get("geometry")
-        if (not isinstance(geometry, dict) or geometry.get("type") not in {"Polygon", "MultiPolygon"}
+        if (not isinstance(geometry, dict) or geometry.get("type") not in ("Polygon", "MultiPolygon")
                 or not isinstance(geometry.get("coordinates"), list)):
             raise ValueError("Expected polygon outlines in the basemap")
     return data

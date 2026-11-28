@@ -83,6 +83,12 @@ class MapDataTests(unittest.TestCase):
                 self.assertEqual(maps.prepare_map_data(True, cache, notify=messages.append).basemap, cached)
             self.assertEqual(cached.read_bytes(), original)
             self.assertTrue(any("SHA-256" in message for message in messages))
+            cached.write_text(json.dumps({
+                "type": "FeatureCollection",
+                "features": [{"type": "Feature", "geometry": {"type": [], "coordinates": []}}],
+            }), encoding="utf-8")
+            self.assertEqual(maps.prepare_map_data(False, cache, notify=messages.append).basemap,
+                             maps.BASEMAP)
 
     def test_local_registry_takes_priority(self):
         with TemporaryDirectory() as folder:
