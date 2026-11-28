@@ -5,6 +5,7 @@ import json
 import platform
 from copy import copy
 import re
+import sqlite3
 import statistics
 import sys
 import time
@@ -24,9 +25,11 @@ from mentions import (
     RULES_VERSION as TERMINOLOGY_RULES_VERSION, match_terms, write_terminology_report,
 )
 from geography import (
-    GAZETTEER, find_places, load_places, unknown_candidates,
+    GAZETTEER, LEAFLET, find_places, install_leaflet, load_places, unknown_candidates,
+    write_registry_suggestions,
     write_maps as write_geography_maps,
 )
+from map_data import MapData, prepare_map_data, read_basemap
 from theme_links import write_theme_links
 from html_report import html_report_paths, write_html_report
 from report_utils import write_csv
@@ -133,6 +136,9 @@ def configure_analysis(yaml_module) -> None:
     path = CONFIG_DIR / "analysis.yaml"
     config = safe_load_yaml(path, yaml_module)
     Visualization.from_config(config)  # Validate presentation settings before analysis.
+    maps = config.get("maps", {})
+    if not isinstance(maps, dict) or not isinstance(maps.get("auto_update", False), bool):
+        raise ValueError("maps.auto_update: expected true or false")
     options = config.get("analysis", {})
     if not isinstance(options, dict):
         raise ValueError("analysis: expected a mapping")
@@ -1398,7 +1404,7 @@ def match_geography(title, language):
 
 
 def create_geography_tables(active: list[Record], ordered_sheets: list[str],
-                            place_matcher=None) -> dict[str, Any]:
+                            place_matcher=None, registry_path: Path | None = None) -> dict[str, Any]:
     _, places = load_places()
     place_matcher = place_matcher or match_geography
     rows = []
@@ -1446,6 +1452,13 @@ def create_geography_tables(active: list[Record], ordered_sheets: list[str],
                    key=lambda item: (item[0][0], item[0][1], item[0][2]))))
     write_csv(WORK_DIR / "geography_unmapped_candidates.csv",
               ["record_uid", "sheet_name", "case_id", "candidate", "title"], missing)
+    if registry_path is not None:
+        path = WORK_DIR / "geography_registry_matches.csv"
+        try:
+            write_registry_suggestions(path, missing, registry_path)
+        except (OSError, sqlite3.Error) as error:
+            path.unlink(missing_ok=True)
+            print(f"Settlement registry lookup unavailable: {error}")
     return {"rows": rows, "totals": totals,
             "matched_cases": len({row["record_uid"] for row in rows}),
             "unmapped_candidates": len(missing)}
@@ -1479,7 +1492,8 @@ def thematic_category_rows(active, categories):
 
 
 def create_service_tables(records: list[Record], categories: list[Category], *,
-                          document_matcher=match_document_types, place_matcher=None):
+                          document_matcher=match_document_types, place_matcher=None,
+                          registry_path: Path | None = None):
     record_fields = [
         "record_uid", "source_archive", "source_fond", "source_inventory", "source_id",
         "language", "detected_language", "language_source", "title_normalized",
@@ -1715,7 +1729,7 @@ def create_service_tables(records: list[Record], categories: list[Category], *,
           )}
          for sheet_name in ordered_sheets for document_type in DOCUMENT_TYPES),
     )
-    geography = create_geography_tables(active, ordered_sheets, place_matcher)
+    geography = create_geography_tables(active, ordered_sheets, place_matcher, registry_path)
     return {
         "active": active,
         "topic_unclassified": topic_unclassified,
@@ -2475,7 +2489,8 @@ def print_summary(records, issues, table_data, figures_created) -> None:
 
 
 def analyze_workbook(openpyxl_module, yaml_module, plt, categories, ambiguities,
-                     macroblock_labels, dictionary_version, run_id) -> dict[str, Any]:
+                     macroblock_labels, dictionary_version, run_id,
+                     map_data: MapData = MapData()) -> dict[str, Any]:
     global RUN_DIR, REPORTS_DIR, FIGURES_DIR, WORK_DIR, THEMATIC_DIR
     visual = Visualization.from_config(ANALYSIS_CONFIG)
     configure_workbook_sources(openpyxl_module)
@@ -2504,6 +2519,8 @@ def analyze_workbook(openpyxl_module, yaml_module, plt, categories, ambiguities,
     classify_records(records, categories, ambiguities, macroblock_order)
 
     roots = REPORTS_DIR, FIGURES_DIR, WORK_DIR
+    basemap = read_basemap(map_data.basemap)
+    leaflet_dir = install_leaflet(FIGURES_DIR / "_leaflet")
     scopes = dict(sorted(records_by_source.items()))
     scopes["combined"] = records
     # Each title contributes both to its fonds and to the workbook as a whole.
@@ -2521,6 +2538,7 @@ def analyze_workbook(openpyxl_module, yaml_module, plt, categories, ambiguities,
         scoped_issues = [i for i in issues if i.sheet_name in sheets or not i.sheet_name] if scope != "combined" else issues
         table_data = create_service_tables(
             subset, categories, document_matcher=document_matcher, place_matcher=place_matcher,
+            registry_path=map_data.registry,
         )
         sheets_for_map = chart_sheet_order(subset)
         labels = {sheet: configured_description_label(sheet) for sheet in sheets_for_map}
@@ -2550,6 +2568,8 @@ def analyze_workbook(openpyxl_module, yaml_module, plt, categories, ambiguities,
             colors,
             scope_title,
             visual=visual,
+            basemap=basemap,
+            leaflet_dir=leaflet_dir,
         )
         write_analysis_report(subset, scoped_issues, categories, macroblock_labels,
                               table_data, figures_created, dictionary_version)
@@ -2576,7 +2596,7 @@ def analyze_workbook(openpyxl_module, yaml_module, plt, categories, ambiguities,
                       *CONFIG_DIR.glob("*.yaml"), *CONFIG_DIR.glob("*.json"),
                       *DICTIONARIES_DIR.glob("*.yaml"),
                       *(BASE_DIR / "maps").glob("*.html"),
-                      *(BASE_DIR / "maps").glob("*.geojson")})
+                      map_data.basemap, *(p for p in LEAFLET.rglob("*") if p.is_file())})
     manifest = {
         "status": "complete",
         "script_version": SCRIPT_VERSION,
@@ -2584,6 +2604,11 @@ def analyze_workbook(openpyxl_module, yaml_module, plt, categories, ambiguities,
         "document_type_rules_version": DOCUMENT_TYPE_RULES_VERSION,
         "terminology_rules_version": TERMINOLOGY_RULES_VERSION,
         "geography_rules_version": load_places()[0],
+        "geography_data": {
+            "basemap": map_data.basemap.relative_to(BASE_DIR).as_posix()
+            if map_data.basemap.is_relative_to(BASE_DIR) else map_data.basemap.as_posix(),
+            "registry_sha256": map_data.registry_sha256,
+        },
         "run_id": run_id,
         "completed_at": datetime.now().isoformat(timespec="seconds"),
         "python": platform.python_version(),
@@ -2639,6 +2664,7 @@ def main() -> None:
     openpyxl_module, yaml_module, plt = load_dependencies()
     configure_analysis(yaml_module)
     workbooks = input_workbooks()
+    map_data = prepare_map_data(ANALYSIS_CONFIG.get("maps", {}).get("auto_update", False))
     print(tr('Workbooks to analyse: {0}', len(workbooks)))
     categories, ambiguities, macroblock_labels, dictionary_version = load_dictionaries(yaml_module)
     LANGUAGE_CATEGORIES.clear()
@@ -2662,7 +2688,7 @@ def main() -> None:
         try:
             summary.append(analyze_workbook(
                 openpyxl_module, yaml_module, plt, categories, ambiguities,
-                macroblock_labels, dictionary_version, run_id,
+                macroblock_labels, dictionary_version, run_id, map_data=map_data,
             ))
         except Exception as error:
             RUN_DIR.mkdir(parents=True, exist_ok=True)

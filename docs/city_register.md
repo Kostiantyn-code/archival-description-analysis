@@ -2,8 +2,11 @@
 
 `tools/city_register.py` builds, searches and extends an offline SQLite register
 of present-day and historical names. Use it as a reference when checking
-geographical mentions in archival descriptions. The report maps use the
-project's [curated geography vocabulary](../config/geography.yaml).
+geographical mentions in archival descriptions. When the register is available,
+the analysis writes possible matches for unresolved candidates to a CSV table.
+The maps plot mentions recognized by the project's
+[curated geography vocabulary](../config/geography.yaml).
+[Installing the registry with offline maps](offline_maps.md)
 
 ## Джерела / Sources
 

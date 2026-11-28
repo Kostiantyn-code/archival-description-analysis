@@ -7,20 +7,24 @@ geocode an unknown title or interpret an administrative adjective as a city.
 from __future__ import annotations
 
 import re
+from contextlib import closing
 from dataclasses import dataclass
 from functools import lru_cache
+from os.path import relpath
 from pathlib import Path
+from shutil import copytree
 from typing import Any
+from urllib.parse import quote
 
 import yaml
 from language_packs import alias_hits, pack_content
 import html
-import json
-from report_utils import json_for_script
+from report_utils import json_for_script, write_csv
 from localization import Visualization
+from map_data import BASEMAP, open_registry, read_basemap
+from tools.city_register import lookup
 
 GAZETTEER = Path(__file__).resolve().parent / "config" / "geography.yaml"
-BASEMAP = Path(__file__).resolve().parent / "maps" / "europe-basemap.geojson"
 
 
 @dataclass(frozen=True)
@@ -142,11 +146,38 @@ def unknown_candidates(
 
 
 MAP_TEMPLATE = Path(__file__).resolve().parent / "maps" / "map-template.html"
+LEAFLET = MAP_TEMPLATE.with_name("leaflet")
 VIEWS = {
     "south": ("Південь України", [[44.1, 28.2], [48.5, 37.5]]),
     "europe": ("Європа", [[35.0, -12.0], [63.0, 50.0]]),
     "russia": ("Європейська частина РФ", [[43.0, 28.0], [62.5, 61.0]]),
 }
+
+
+def install_leaflet(destination: Path) -> Path:
+    copytree(LEAFLET, destination, dirs_exist_ok=True)
+    return destination
+
+
+def write_registry_suggestions(path: Path, candidates: list[dict[str, Any]], registry: Path) -> None:
+    fields = ["record_uid", "sheet_name", "case_id", "candidate", "title",
+              "place_id", "place_name", "country", "admin1", "latitude", "longitude",
+              "source_spelling", "name_language", "historic", "used_from", "used_to",
+              "source", "place_url"]
+    with closing(open_registry(registry)) as connection:
+        @lru_cache(maxsize=1024)
+        def matches(spelling):
+            return list(lookup(connection, spelling))
+
+        write_csv(path, fields, (
+            {**candidate, "place_id": match["id"], "place_name": match["name"],
+             "country": match["country"], "admin1": match["admin1"],
+             "latitude": match["latitude"], "longitude": match["longitude"],
+             "source_spelling": match["spelling"], "name_language": match["language"],
+             "historic": match["historic"], "used_from": match["used_from"],
+             "used_to": match["used_to"], "source": match["source"], "place_url": match["place_url"]}
+            for candidate in candidates for match in matches(candidate["candidate"])
+        ))
 
 
 def write_maps(
@@ -157,8 +188,11 @@ def write_maps(
     colors: dict[str, str],
     title: str,
     visual: Visualization | None = None,
+    *,
+    basemap: dict | None = None,
+    leaflet_dir: Path | None = None,
 ) -> None:
-    """Create three independent HTML files with embedded geography and data."""
+    """Create map pages with embedded geography and a shared offline runtime."""
     visual = visual or Visualization()
     destination.mkdir(parents=True, exist_ok=True)
     sites: dict[str, dict[str, Any]] = {}
@@ -190,11 +224,16 @@ def write_maps(
                         f"case file {row['case_id']}: {row['title'][:240]}"
                     )
     template = visual.template(MAP_TEMPLATE.read_text(encoding="utf-8"))
-    basemap = json.loads(BASEMAP.read_text(encoding="utf-8"))
+    if basemap is None:
+        basemap = read_basemap(BASEMAP)
+    if leaflet_dir is None:
+        leaflet_dir = install_leaflet(destination / "_leaflet")
+    leaflet_url = quote(Path(relpath(leaflet_dir, destination)).as_posix(), safe="/")
     decades = sorted(
         {str(row["decade"]) for row in mentions if row["decade"] != "unknown"}, key=int
     )
     common = {
+        "__LEAFLET_DIR__": leaflet_url,
         "__PLACES__": json_for_script(list(sites.values())),
         "__BASEMAP__": json_for_script(basemap),
         "__DECADES__": json_for_script(decades),
