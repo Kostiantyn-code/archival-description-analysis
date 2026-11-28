@@ -1,0 +1,15 @@
+place_id	spelling	language	kind	used_from	used_to	source
+705812	Єлисаветград	uk	historical		1924	https://kroptravel.gov.ua/node/3
+705812	Зінов'євськ	uk	historical	1924	1934	https://kroptravel.gov.ua/node/3
+705812	Кірово	uk	historical	1934	1939	https://kroptravel.gov.ua/node/3
+705812	Кіровоград	uk	historical	1939	2016	https://kr-rada.gov.ua/site/uploads/files/Strategy_2030/STRATEGY_2030_04-02-2025.pdf
+705812	Єлисаветграда	uk	inflected			Author transcription, genitive of Єлисаветград: https://kroptravel.gov.ua/node/3
+709930	Катеринослав	uk	historical		1926	https://www.dnu.dp.ua/news/879
+709930	Дніпропетровськ	uk	historical	1926	2016	https://uinp.gov.ua/istorychnyy-kalendar/traven/19/2016-rik-misto-dnipropetrovsk-pereymenuvaly-na-dnipro
+709930	Катеринослава	uk	inflected			Project geography vocabulary: https://github.com/Kostiantyn-code/archival-description-analysis/blob/7309a1439b044892f6803c8769d96921f5d49276/config/geography.yaml
+709930	Дніпропетровська	uk	inflected			Author transcription, genitive of Дніпропетровськ: https://zakon.rada.gov.ua/laws/show/1375-19
+588335	Dorpat	de	historical			https://tartu.ee/muinsuskaitse
+588335	Jurjev	et	historical			https://muuseum.tartu.ee/en/tartu-linnamuuseum/an-overview-of-the-museum/
+3190261	Spalato	it	variant			https://visitsplit.com/clients/1/downloads/63mbniuyaxa33rr.pdf?lang=en
+5557293	New Archangel	en	historical	1804	1867	https://www.nps.gov/common/uploads/teachers/lessonplans/SITKAbacus_Curriculum.pdf
+5557293	Novo-Arkhangelsk		historical	1804	1867	https://www.nps.gov/common/uploads/teachers/lessonplans/SITKAbacus_Curriculum.pdf
