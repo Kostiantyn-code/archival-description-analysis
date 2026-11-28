@@ -114,7 +114,7 @@ class MultiWorkbookTests(unittest.TestCase):
                 with patch.object(f, "configure_analysis", lambda _: None), \
                      patch.object(f, "load_dependencies", lambda: (openpyxl, yaml, None)), \
                      contextlib.redirect_stdout(io.StringIO()):
-                    with self.assertRaisesRegex(RuntimeError, "Some workbooks"):
+                    with self.assertRaisesRegex(RuntimeError, "Частина книг не опрацьована"):
                         f.main()
                 run = next(f.OUTPUTS_DIR.iterdir())
                 with (run / "run_summary.csv").open(encoding="utf-8-sig", newline="") as stream:

@@ -32,7 +32,8 @@ class HtmlReportTests(unittest.TestCase):
     def test_empty_report_has_no_broken_assets_or_nan(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            path = write_html_report(root, "Порожня.xlsx", {"combined": []}, [], "test", "test", {}, visual=Visualization("uk"))
+            path = write_html_report(root, "Порожня.xlsx", {"combined": []}, [], "test", "test", {},
+                                     visual=Visualization("uk", alternate_languages=False))
             page = path.read_text()
             self.assertIn("Не визначено", page)
             self.assertIn("Статичні графіки не створено", page)

@@ -12,7 +12,8 @@ exports:
   unclassified_file: unclassified.xlsx
   service_records_file: service_records.xlsx
 visualization:
-  language: en
+  language: uk
+  alternate_languages: true
   bilingual_labels: false
   label_overrides: {}
 analysis:
