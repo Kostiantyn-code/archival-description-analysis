@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="uk"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>__PAGE_TITLE__</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="__LEAFLET_DIR__/leaflet.css">
 <style>
 :root{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:#203040;background:#f7fafc}
 body{margin:0}main{max-width:1280px;margin:auto;padding:18px 24px 26px}
@@ -28,9 +28,9 @@ button[aria-pressed="true"]{background:#275c83;color:white}.summary{margin-left:
 <span class="summary" id="summary" aria-live="polite"></span></div>
 <div id="map" role="application" aria-label="Карта географічних згадок із фільтром за десятиліттям"></div>
 <div class="legend" id="legend"></div>
-<p class="foot">Одна справа враховується один раз для кожного названого міста. Десятиліття визначено за початковим роком справи або заголовком розділу — як у <code>themes_by_decade</code>. Координати позначають приблизний сучасний центр населеного пункту, а не місце події. Словник топонімів неповний: переглядайте <code>geography_unmapped_candidates.csv</code>. Географічні контури включені у файл; для завантаження бібліотеки Leaflet потрібен інтернет.</p>
+<p class="foot">Одна справа враховується один раз для кожного названого міста. Десятиліття визначено за початковим роком справи або заголовком розділу — як у <code>themes_by_decade</code>. Координати позначають приблизний сучасний центр населеного пункту, а не місце події. Словник топонімів неповний: переглядайте <code>geography_unmapped_candidates.csv</code>. Карта працює офлайн разом із папкою звіту.</p>
 </main>
-<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="__LEAFLET_DIR__/leaflet.js"></script>
 <script>
 const places=__PLACES__, base=__BASEMAP__, decades=__DECADES__, labels=__LABELS__, colors=__COLORS__, bounds=__BOUNDS__;
 const selector=document.getElementById('period'),counter=document.getElementById('summary');
@@ -39,7 +39,10 @@ option('all','Усі десятиліття');decades.forEach(d=>option(d,`${d}�
 if(places.some(p=>p.byDecade.unknown))option('unknown','Без визначеного десятиліття');
 const legend=document.getElementById('legend');labels.forEach((label,i)=>{const item=document.createElement('span'),dot=document.createElement('i');dot.className='swatch';dot.style.background=colors[i];item.append(dot,document.createTextNode(label));legend.append(item)});
 const map=L.map('map',{scrollWheelZoom:false,maxZoom:10});
-L.geoJSON(base,{style:f=>({color:f.properties.Ukraine?'#879f9a':'#b5bfc2',weight:f.properties.Ukraine?1.1:.8,fillColor:f.properties.Ukraine?'#edf2e8':'#e7eee8',fillOpacity:1})}).addTo(map);
+L.geoJSON(base,{style:f=>{
+const ukraine=f.properties?.Ukraine;
+return {color:ukraine?'#879f9a':'#b5bfc2',weight:ukraine?1.1:.8,fillColor:ukraine?'#edf2e8':'#e7eee8',fillOpacity:1};
+}}).addTo(map);
 map.attributionControl.addAttribution('Україна: <a href="https://github.com/darmat1/ukraine-geo-data">OpenStreetMap contributors</a> (ODbL); інші контури: <a href="https://www.naturalearthdata.com/">Natural Earth</a>');
 const layer=L.layerGroup().addTo(map);
 function safe(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}

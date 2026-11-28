@@ -1,5 +1,7 @@
 input_dir: input
 output_root: outputs
+maps:
+  auto_update: true
 chronology:
   minimum_year: 1500
   maximum_year: 2099

@@ -67,6 +67,9 @@ class GeographyTests(unittest.TestCase):
                 self.assertIn("Миколаїв", content)
                 self.assertIn("European Russia", content)
                 self.assertNotIn("tile.openstreetmap.org", content)
+                self.assertNotIn("cdn.jsdelivr.net", content)
+                self.assertIn('src="_leaflet/leaflet.js"', content)
+                self.assertTrue((folder / "_leaflet/leaflet.js").is_file())
                 self.assertNotIn("__BASEMAP__", content)
 
 

@@ -10,6 +10,7 @@ htmlcov/
 input/*.xlsx
 ~$*.xlsx
 outputs/
+map-data/
 
 # Editor and operating-system metadata
 .idea/

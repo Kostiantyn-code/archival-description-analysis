@@ -20,7 +20,8 @@
 Головний звіт відкривається українською та має перемикач п’яти мов.
 У `config/analysis.yaml` параметр `visualization.language` задає мову відкриття,
 а `visualization.alternate_languages: false` залишає одну версію.
-Карти завантажують Leaflet через інтернет.
+Карти працюють офлайн. За наявності мережі програма перевіряє оновлення в
+GitHub Releases і зберігає їх локально. [Як оновлюються карти й реєстр](docs/offline_maps.md)
 
 ### Новий реєстр населених пунктів
 
@@ -48,7 +49,8 @@ counts are unavailable. Ukrainian headers are also accepted.
 The main report opens in Ukrainian with a five-language switcher.
 In `config/analysis.yaml`, use `visualization.language` to change the opening
 language and `visualization.alternate_languages: false` to produce one version.
-Maps load Leaflet over the internet.
+Maps work offline. When online, the program checks GitHub Releases for updates
+and caches them locally. [Map and registry updates](docs/offline_maps.md)
 
 ### New settlement register
 

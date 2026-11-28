@@ -298,7 +298,7 @@ figure{margin:20px 0;padding:12px;background:white;border:1px solid var(--line)}
 {5}{9}<section id="downloads"><h2>Файли результатів</h2>{6}
 <h3>Тематичні вибірки</h3>{7}</section>
 <footer>Для передавання звіту збережіть усю папку результатів книги разом із підпапками.
-Головний звіт, мережа тем і термінологія працюють локально. Географічні карти потребують інтернету для завантаження Leaflet.
+Головний звіт, мережа тем, термінологія та географічні карти працюють офлайн.
 Сучасні кордони на картах не відтворюють адміністративний поділ досліджуваного періоду.</footer>
 </main></body></html>''', _escape(workbook_name), _escape(workbook_name), _escape(script_version), _escape(dictionary_version), ' '.join(navigation), ''.join(sections), general, exports,
         '<a href="#udc">' + tr('Thematic categories and UDC') + '</a>' if udc_section else '', udc_section,
